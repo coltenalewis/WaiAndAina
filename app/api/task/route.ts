@@ -18,6 +18,15 @@ const TASK_TYPE_PROPERTY_KEY = "Task Type";   // select
 function getPlainText(prop: any): string {
   if (!prop) return "";
 
+  // NEW: handle raw rich_text arrays (like comments)
+  if (Array.isArray(prop)) {
+    return prop
+      .map((t: any) => t.plain_text || "")
+      .join("")
+      .trim();
+  }
+
+  // Existing property handling
   switch (prop.type) {
     case "title":
       return (prop.title || [])
@@ -42,6 +51,13 @@ function getPlainText(prop: any): string {
         .join(", ")
         .trim();
     default:
+      // Optional: final fallback if we get raw { rich_text: [...] } without type
+      if (Array.isArray(prop.rich_text)) {
+        return prop.rich_text
+          .map((t: any) => t.plain_text || "")
+          .join("")
+          .trim();
+      }
       return "";
   }
 }
