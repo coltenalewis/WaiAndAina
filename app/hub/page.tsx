@@ -43,12 +43,6 @@ type TaskDetails = {
   description: string;
   status: string;
   comments: TaskComment[];
-  photos: { name: string; url: string }[];
-};
-
-type TaskMeta = {
-  status: string;
-  description: string;
 };
 
 export default function HubSchedulePage() {
@@ -70,10 +64,6 @@ export default function HubSchedulePage() {
   const [modalLoading, setModalLoading] = useState(false);
   const [commentDraft, setCommentDraft] = useState("");
   const [commentSubmitting, setCommentSubmitting] = useState(false);
-  const [photoDrafts, setPhotoDrafts] = useState<
-    { file: File; preview: string }[]
-  >([]);
-  const [photoSubmitting, setPhotoSubmitting] = useState(false);
 
   const statusOptions = [
     "Not Started",
@@ -289,7 +279,6 @@ export default function HubSchedulePage() {
           description: "",
           status: "",
           comments: [],
-          photos: [],
         });
         return;
       }
@@ -300,15 +289,7 @@ export default function HubSchedulePage() {
         description: json.description || "",
         status: json.status || "",
         comments: json.comments || [],
-        photos: json.photos || [],
       });
-      setTaskMetaMap((prev) => ({
-        ...prev,
-        [json.name || taskName]: {
-          status: json.status || "",
-          description: json.description || "",
-        },
-      }));
     } catch (e) {
       console.error("Failed to load task details:", e);
       setModalDetails({
@@ -316,7 +297,6 @@ export default function HubSchedulePage() {
         description: "",
         status: "",
         comments: [],
-        photos: [],
       });
     } finally {
       setModalLoading(false);
@@ -327,13 +307,6 @@ export default function HubSchedulePage() {
     setModalDetails((prev) =>
       prev ? { ...prev, status: newStatus } : prev
     );
-    setTaskMetaMap((prev) => ({
-      ...prev,
-      [taskName]: {
-        status: newStatus,
-        description: prev[taskName]?.description || "",
-      },
-    }));
 
     try {
       await fetch("/api/task", {
@@ -353,8 +326,7 @@ export default function HubSchedulePage() {
     setCommentSubmitting(true);
 
     try {
-      const authorPrefix = currentUserName ? `${currentUserName}: ` : "";
-      const comment = `${authorPrefix}${commentDraft.trim()}`;
+      const comment = commentDraft.trim();
       const res = await fetch("/api/task", {
         method: "POST",
         headers: {
@@ -374,88 +346,11 @@ export default function HubSchedulePage() {
     }
   }
 
-  async function compressImage(file: File): Promise<File> {
-    const img = document.createElement("img");
-    img.src = URL.createObjectURL(file);
-
-    await new Promise((resolve, reject) => {
-      img.onload = () => resolve(null);
-      img.onerror = reject;
-    });
-
-    const maxDim = 1200;
-    const scale = Math.min(1, maxDim / Math.max(img.width, img.height));
-    const canvas = document.createElement("canvas");
-    canvas.width = Math.max(1, Math.round(img.width * scale));
-    canvas.height = Math.max(1, Math.round(img.height * scale));
-
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return file;
-    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-
-    const blob: Blob | null = await new Promise((resolve) =>
-      canvas.toBlob((b) => resolve(b), "image/jpeg", 0.75)
-    );
-
-    if (!blob) return file;
-    return new File([blob], file.name.replace(/\.[^.]+$/, ".jpg"), {
-      type: "image/jpeg",
-      lastModified: Date.now(),
-    });
-  }
-
-  async function handlePhotoSelection(fileList: FileList | null) {
-    if (!fileList) return;
-    const files = Array.from(fileList).slice(0, 5);
-
-    const compressed: { file: File; preview: string }[] = [];
-    for (const file of files) {
-      const safeFile = await compressImage(file);
-      const preview = URL.createObjectURL(safeFile);
-      compressed.push({ file: safeFile, preview });
-    }
-
-    setPhotoDrafts(compressed);
-  }
-
-  async function submitPhotos(taskName: string) {
-    if (!photoDrafts.length) return;
-    setPhotoSubmitting(true);
-
-    try {
-      const photosPayload: { name: string; url: string }[] = [];
-      for (const draft of photoDrafts) {
-        const arrayBuffer = await draft.file.arrayBuffer();
-        const base64 = btoa(
-          String.fromCharCode(...new Uint8Array(arrayBuffer))
-        );
-        const dataUrl = `data:${draft.file.type};base64,${base64}`;
-        photosPayload.push({ name: draft.file.name, url: dataUrl });
-      }
-
-      await fetch("/api/task", {
-        method: "PATCH",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ name: taskName, photos: photosPayload }),
-      });
-
-      setPhotoDrafts([]);
-      await loadTaskDetails(taskName);
-    } catch (err) {
-      console.error("Failed to upload photos", err);
-    } finally {
-      setPhotoSubmitting(false);
-    }
-  }
-
   // When a task box is clicked
   async function handleTaskClick(payload: TaskClickPayload) {
     setModalTask(payload);
     setModalDetails(null);
     setCommentDraft("");
-    setPhotoDrafts([]);
 
     const primaryTitle = payload.task.split("\n")[0].trim();
     if (!primaryTitle) {
@@ -464,7 +359,6 @@ export default function HubSchedulePage() {
         description: "",
         status: "",
         comments: [],
-        photos: [],
       });
       return;
     }
@@ -476,7 +370,6 @@ export default function HubSchedulePage() {
     setModalTask(null);
     setModalDetails(null);
     setCommentDraft("");
-    setPhotoDrafts([]);
   }
 
   return (
@@ -559,48 +452,27 @@ export default function HubSchedulePage() {
                 </div>
               )}
 
-              {!loading &&
-                !error &&
-                data &&
-                workSlots.length > 0 &&
-                activeView === "schedule" && (
-                  <>
-                    <div className="hidden md:block overflow-x-auto">
-                      <ScheduleGrid
-                        data={data}
-                        workSlots={workSlots}
-                        currentUserName={currentUserName}
-                        currentSlotId={currentSlotId}
-                        onTaskClick={handleTaskClick}
-                        statusMap={taskMetaMap}
-                      />
-                    </div>
-                    <div className="md:hidden">
-                      <ScheduleGridMobile
-                        data={data}
-                        workSlots={workSlots}
-                        currentSlotId={currentSlotId}
-                        onTaskClick={handleTaskClick}
-                        statusMap={taskMetaMap}
-                      />
-                    </div>
-                  </>
-                )}
-
-              {!loading &&
-                !error &&
-                data &&
-                workSlots.length > 0 &&
-                activeView === "myTasks" && (
-                  <div className="px-4 py-4">
-                    <MyTasksList
-                      tasks={myTasks}
-                      onTaskClick={handleTaskClick}
-                      statusMap={taskMetaMap}
+              {!loading && !error && data && workSlots.length > 0 && (
+                <>
+                  <div className="hidden md:block overflow-x-auto">
+                    <ScheduleGrid
+                      data={data}
+                      workSlots={workSlots}
                       currentUserName={currentUserName}
+                      currentSlotId={currentSlotId}
+                      onTaskClick={handleTaskClick}
                     />
                   </div>
-                )}
+                  <div className="md:hidden">
+                    <ScheduleGridMobile
+                      data={data}
+                      workSlots={workSlots}
+                      currentSlotId={currentSlotId}
+                      onTaskClick={handleTaskClick}
+                    />
+                  </div>
+                </>
+              )}
 
               {!loading && !error && data && workSlots.length === 0 && (
                 <div className="px-4 py-6 text-sm text-center text-[#7a7f54]">
@@ -768,96 +640,12 @@ export default function HubSchedulePage() {
                 <div className="flex items-center justify-between">
                   <div>
                     <p className="text-[10px] uppercase tracking-[0.12em] text-[#8a8256]">
-                      Task Photos
-                    </p>
-                    <p className="text-[11px] text-[#6a6748]">
-                      Upload or review photos for this task.
-                    </p>
-                  </div>
-                </div>
-                <div className="space-y-2">
-                  {modalDetails?.photos?.length ? (
-                    <div className="flex flex-wrap gap-2">
-                      {modalDetails.photos.map((photo) => (
-                        <a
-                          key={photo.url}
-                          href={photo.url}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="group block w-24 overflow-hidden rounded-md border border-[#e2d7b5] bg-[#f7f3de]"
-                        >
-                          <div className="aspect-square w-full overflow-hidden">
-                            {/* eslint-disable-next-line @next/next/no-img-element */}
-                            <img
-                              src={photo.url}
-                              alt={photo.name}
-                              className="h-full w-full object-cover transition group-hover:scale-105"
-                            />
-                          </div>
-                          <p className="truncate px-2 py-1 text-[10px] text-[#5b593c]">
-                            {photo.name}
-                          </p>
-                        </a>
-                      ))}
-                    </div>
-                  ) : (
-                    <p className="text-[11px] text-[#7a7f54] italic">
-                      No photos uploaded for this task yet.
-                    </p>
-                  )}
-                </div>
-                <div className="space-y-2">
-                  <input
-                    type="file"
-                    accept="image/*"
-                    multiple
-                    onChange={(e) => handlePhotoSelection(e.target.files)}
-                    className="w-full text-[12px] text-[#4f4b33]"
-                  />
-                  {photoDrafts.length > 0 && (
-                    <div className="flex flex-wrap gap-2">
-                      {photoDrafts.map((draft) => (
-                        <div
-                          key={draft.preview}
-                          className="w-20 overflow-hidden rounded-md border border-[#d0c9a4] bg-[#f9f7e8]"
-                        >
-                          <div className="aspect-square w-full overflow-hidden">
-                            {/* eslint-disable-next-line @next/next/no-img-element */}
-                            <img
-                              src={draft.preview}
-                              alt={draft.file.name}
-                              className="h-full w-full object-cover"
-                            />
-                          </div>
-                          <p className="truncate px-2 py-1 text-[10px] text-[#5b593c]">
-                            {draft.file.name}
-                          </p>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                  <button
-                    type="button"
-                    disabled={!photoDrafts.length || photoSubmitting}
-                    onClick={() => submitPhotos(modalDetails?.name || modalTask.task)}
-                    className="w-full rounded-md bg-[#5d7f3b] px-3 py-2 text-xs font-semibold uppercase tracking-[0.12em] text-white shadow-md hover:bg-[#526d34] disabled:opacity-60"
-                  >
-                    {photoSubmitting ? "Uploading…" : "Upload Photos"}
-                  </button>
-                </div>
-              </div>
-
-              <div className="rounded-lg border border-[#e2d7b5] bg-white/70 px-4 py-3 space-y-3">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-[10px] uppercase tracking-[0.12em] text-[#8a8256]">
                       Status update
                     </p>
                     <p className="text-[11px] text-[#6a6748]">
-                      Update Task Status
+                      Choose a status to update this task in Notion.
                     </p>
                   </div>
-                  <StatusBadge status={modalDetails?.status} />
                 </div>
                 <select
                   value={modalDetails?.status || ""}
@@ -873,9 +661,9 @@ export default function HubSchedulePage() {
                   <option value="" disabled>
                     Select a status
                   </option>
-                  {statusOptions.map((option, idx) => (
+                  {statusOptions.map((option) => (
                     <option key={option} value={option}>
-                      {idx + 1}. {option}
+                      {option}
                     </option>
                   ))}
                 </select>
@@ -1334,13 +1122,11 @@ function ScheduleGridMobile({
   workSlots,
   currentSlotId,
   onTaskClick,
-  statusMap,
 }: {
   data: ScheduleResponse;
   workSlots: Slot[];
   currentSlotId: string | null;
   onTaskClick?: (payload: TaskClickPayload) => void;
-  statusMap: Record<string, TaskMeta>;
 }) {
   const slotIndexMap: Record<string, number> = {};
   data.slots.forEach((slot, idx) => {
@@ -1372,8 +1158,6 @@ function ScheduleGridMobile({
               });
 
               const isCurrent = slot.id === currentSlotId;
-              const primaryTitle = task.split("\n")[0].trim();
-              const status = statusMap[primaryTitle]?.status || "";
 
               return (
                 <button
@@ -1393,14 +1177,13 @@ function ScheduleGridMobile({
                 >
                   <div className="flex items-start justify-between gap-2">
                     <div>
-                        <p className="text-[11px] uppercase tracking-[0.12em] text-[#7a7f54]">
-                          {slot.label}
-                        </p>
-                        {slot.timeRange && (
-                          <p className="text-[10px] text-[#8a8256]">{slot.timeRange}</p>
-                        )}
-                      </div>
-                      <StatusBadge status={status} />
+                      <p className="text-[11px] uppercase tracking-[0.12em] text-[#7a7f54]">
+                        {slot.label}
+                      </p>
+                      {slot.timeRange && (
+                        <p className="text-[10px] text-[#8a8256]">{slot.timeRange}</p>
+                      )}
+                    </div>
                     {isCurrent && (
                       <span className="mt-1 inline-flex items-center rounded-full bg-[#eef5dd] px-2 py-[1px] text-[10px] font-semibold text-[#476524]">
                         Now
