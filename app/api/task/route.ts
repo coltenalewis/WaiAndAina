@@ -12,6 +12,7 @@ const TASKS_DB_ID = process.env.NOTION_TASKS_DATABASE_ID!;
 const TASK_NAME_PROPERTY_KEY = "Name";        // title
 const TASK_DESC_PROPERTY_KEY = "Description"; // rich_text
 const TASK_STATUS_PROPERTY_KEY = "Status";    // select
+const TASK_PHOTOS_PROPERTY_KEY = "Photos";    // files
 
 function getPlainText(prop: any): string {
   if (!prop) return "";
@@ -32,6 +33,11 @@ function getPlainText(prop: any): string {
     case "multi_select":
       return (prop.multi_select || [])
         .map((s: any) => s.name || "")
+        .join(", ")
+        .trim();
+    case "files":
+      return (prop.files || [])
+        .map((f: any) => f.name || "")
         .join(", ")
         .trim();
     default:

@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { loadSession } from "@/lib/session";
+import type { TaskMeta } from "./types";
 
 type Slot = {
   id: string;
@@ -52,6 +53,12 @@ export default function HubSchedulePage() {
   const [currentUserName, setCurrentUserName] = useState<string | null>(null);
   const [currentSlotId, setCurrentSlotId] = useState<string | null>(null);
 
+  const [activeView, setActiveView] = useState<"schedule" | "myTasks">(
+    "schedule"
+  );
+
+  const [taskMetaMap, setTaskMetaMap] = useState<Record<string, TaskMeta>>({});
+  
   // Modal state
   const [modalTask, setModalTask] = useState<TaskClickPayload | null>(null);
   const [modalDetails, setModalDetails] = useState<TaskDetails | null>(null);
@@ -95,6 +102,64 @@ export default function HubSchedulePage() {
     loadSchedule();
   }, []);
 
+  // Preload task status/description for tagging
+  useEffect(() => {
+    if (!data) return;
+
+    const uniqueTasks = new Set<string>();
+    data.cells.forEach((row) => {
+      row.forEach((cell) => {
+        const primary = cell.split("\n")[0].trim();
+        if (primary) uniqueTasks.add(primary);
+      });
+    });
+
+    const missing = Array.from(uniqueTasks).filter(
+      (name) => !taskMetaMap[name]
+    );
+    if (missing.length === 0) return;
+
+    (async () => {
+      const results = await Promise.all(
+        missing.map(async (name) => {
+          try {
+            const res = await fetch(
+              `/api/task?name=${encodeURIComponent(name)}`
+            );
+            if (!res.ok) return null;
+            const json = await res.json();
+            return {
+              key: json.name || name,
+              original: name,
+              status: json.status || "",
+              description: json.description || "",
+            } as const;
+          } catch (err) {
+            console.error("Failed to preload task meta", err);
+            return null;
+          }
+        })
+      );
+
+      setTaskMetaMap((prev) => {
+        const next = { ...prev } as Record<string, TaskMeta>;
+        results.forEach((item) => {
+          if (item) {
+            next[item.key] = {
+              status: item.status,
+              description: item.description,
+            };
+            next[item.original] = {
+              status: item.status,
+              description: item.description,
+            };
+          }
+        });
+        return next;
+      });
+    })();
+  }, [data, taskMetaMap]);
+
   // Split slots
   const mealSlots = useMemo(
     () => data?.slots.filter((s) => s.isMeal) ?? [],
@@ -104,6 +169,38 @@ export default function HubSchedulePage() {
     () => data?.slots.filter((s) => !s.isMeal) ?? [],
     [data]
   );
+
+  const myTasks = useMemo(() => {
+    if (!data || !currentUserName) return [] as {
+      slot: Slot;
+      task: string;
+      groupNames: string[];
+    }[];
+
+    const rowIndex = data.people.findIndex(
+      (p) => p.toLowerCase() === currentUserName.toLowerCase()
+    );
+    if (rowIndex === -1) return [];
+
+    return workSlots
+      .map((slot) => {
+        const slotIdx = data.slots.findIndex((s) => s.id === slot.id);
+        const task = (data.cells[rowIndex]?.[slotIdx] ?? "").trim();
+        if (!task) return null;
+
+        const groupNames = data.people.filter((_, idx) => {
+          const candidate = (data.cells[idx]?.[slotIdx] ?? "").trim();
+          return candidate && candidate === task;
+        });
+
+        return { slot, task, groupNames };
+      })
+      .filter(Boolean) as {
+      slot: Slot;
+      task: string;
+      groupNames: string[];
+    }[];
+  }, [data, currentUserName, workSlots]);
 
   // Meal assignments
   const mealAssignments: MealAssignment[] = useMemo(() => {
@@ -317,6 +414,31 @@ export default function HubSchedulePage() {
             Click any task to see its details, description, and who you are
             assigned with.
           </p>
+
+          <div className="flex flex-wrap gap-2 pt-1">
+            <button
+              type="button"
+              onClick={() => setActiveView("schedule")}
+              className={`rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-[0.14em] border transition ${
+                activeView === "schedule"
+                  ? "bg-[#a0b764] text-white border-[#8fae4c]"
+                  : "bg-white text-[#5d7f3b] border-[#d0c9a4]"
+              }`}
+            >
+              Schedule
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveView("myTasks")}
+              className={`rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-[0.14em] border transition ${
+                activeView === "myTasks"
+                  ? "bg-[#a0b764] text-white border-[#8fae4c]"
+                  : "bg-white text-[#5d7f3b] border-[#d0c9a4]"
+              }`}
+            >
+              My Tasks
+            </button>
+          </div>
 
           <div className="mt-3 rounded-lg bg-[#a0b764] px-3 py-3">
             <div className="rounded-md bg-[#f8f4e3]">
@@ -603,13 +725,6 @@ function MealBlock({
             <button
               key={a.task}
               type="button"
-              onClick={() =>
-                console.log("Meal task clicked", {
-                  slot: slot.label,
-                  task: a.task,
-                  people: a.people,
-                })
-              }
               className={`w-full text-left rounded-md border px-3 py-2 flex items-center justify-between text-sm shadow-sm transition
                 ${
                   includesUser
@@ -650,7 +765,112 @@ function MealBlock({
 function getMealIcon(label: string): string {
   if (/breakfast/i.test(label)) return "🥚";
   if (/lunch/i.test(label)) return "🍱";
+  if (/dinner/i.test(label)) return "🍽️";
   return "🍽️";
+}
+
+function StatusBadge({ status }: { status?: string }) {
+  if (!status) return null;
+
+  const colorMap: Record<string, string> = {
+    "Not Started": "bg-gray-200 text-gray-800 border-gray-300",
+    Incomplete: "bg-amber-100 text-amber-800 border-amber-200",
+    "In Progress": "bg-blue-100 text-blue-800 border-blue-200",
+    Completed: "bg-emerald-100 text-emerald-800 border-emerald-200",
+  };
+
+  const badgeClass =
+    colorMap[status] || "bg-slate-100 text-slate-800 border-slate-200";
+
+  return (
+    <span
+      className={`inline-flex items-center gap-1 rounded-full border px-2 py-[2px] text-[10px] font-semibold uppercase tracking-[0.12em] ${badgeClass}`}
+    >
+      <span className="h-2 w-2 rounded-full bg-current opacity-80" />
+      {status}
+    </span>
+  );
+}
+
+function MyTasksList({
+  tasks,
+  onTaskClick,
+  statusMap,
+  currentUserName,
+}: {
+  tasks: { slot: Slot; task: string; groupNames: string[] }[];
+  onTaskClick?: (payload: TaskClickPayload) => void;
+  statusMap: Record<string, TaskMeta>;
+  currentUserName?: string | null;
+}) {
+  if (tasks.length === 0) {
+    return (
+      <p className="text-sm text-[#7a7f54] italic">
+        No tasks assigned to you for this schedule.
+      </p>
+    );
+  }
+
+  return (
+    <div className="grid gap-3 md:grid-cols-2">
+      {tasks.map(({ slot, task, groupNames }) => {
+        const primary = task.split("\n")[0].trim();
+        const status = statusMap[primary]?.status || "";
+        const description = statusMap[primary]?.description || "";
+
+        return (
+          <button
+            key={`${primary}-${slot.id}`}
+            type="button"
+            onClick={() =>
+              onTaskClick?.({
+                person: currentUserName || "Me",
+                slot,
+                task,
+                groupNames,
+              })
+            }
+            className="w-full rounded-lg border border-[#d1d4aa] bg-white px-4 py-3 text-left shadow-sm hover:border-[#b8c98a] hover:bg-[#f9f7e8]"
+          >
+            <div className="flex items-start justify-between gap-2">
+              <div>
+                <p className="text-[11px] uppercase tracking-[0.12em] text-[#7a7f54]">
+                  {slot.label}
+                  {slot.timeRange ? ` • ${slot.timeRange}` : ""}
+                </p>
+                <p className="text-sm font-semibold text-[#3e4c24]">{primary}</p>
+                {description && (
+                  <p className="mt-1 text-[12px] text-[#4f4b33] leading-snug">
+                    {description}
+                  </p>
+                )}
+              </div>
+              <StatusBadge status={status} />
+            </div>
+            {task.includes("\n") && (
+              <p className="mt-1 whitespace-pre-line text-[11px] text-[#5b593c]">
+                {task
+                  .split("\n")
+                  .slice(1)
+                  .join("\n")}
+              </p>
+            )}
+            <p className="mt-2 text-[11px] text-[#6a6748]">
+              {groupNames.length > 1
+                ? `With ${groupNames
+                    .filter(
+                      (g) =>
+                        currentUserName &&
+                        g.toLowerCase() !== currentUserName.toLowerCase()
+                    )
+                    .join(", ")}`
+                : "Solo shift"}
+            </p>
+          </button>
+        );
+      })}
+    </div>
+  );
 }
 
 /* ---------- Grid schedule ---------- */
@@ -661,12 +881,14 @@ function ScheduleGrid({
   currentUserName,
   currentSlotId,
   onTaskClick,
+  statusMap,
 }: {
   data: ScheduleResponse;
   workSlots: Slot[];
   currentUserName: string | null;
   currentSlotId: string | null;
   onTaskClick?: (payload: TaskClickPayload) => void;
+  statusMap: Record<string, TaskMeta>;
 }) {
   const { people, slots, cells } = data;
 
@@ -840,6 +1062,8 @@ function ScheduleGrid({
                 }
 
                 const sharedCount = groupNames.length;
+                const primaryTitle = task.split("\n")[0].trim();
+                const status = statusMap[primaryTitle]?.status || "";
 
                 return (
                   <td
@@ -863,13 +1087,16 @@ function ScheduleGrid({
                     >
                       <div className="flex justify-between items-start gap-2">
                         <span className="font-semibold">
-                          {task.split("\n")[0].trim()}
+                          {primaryTitle}
                         </span>
                         {sharedCount > 1 && (
                           <span className="text-[9px] text-[#6e7544] bg-white/70 rounded-full px-2 py-[1px]">
                             {sharedCount} people
                           </span>
                         )}
+                      </div>
+                      <div className="mt-1">
+                        <StatusBadge status={status} />
                       </div>
                       {task.includes("\n") && (
                         <div className="mt-1 whitespace-pre-line opacity-90">
