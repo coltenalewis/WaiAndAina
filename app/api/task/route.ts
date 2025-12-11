@@ -34,6 +34,11 @@ function getPlainText(prop: any): string {
         .map((s: any) => s.name || "")
         .join(", ")
         .trim();
+    case "files":
+      return (prop.files || [])
+        .map((f: any) => f.name || "")
+        .join(", ")
+        .trim();
     default:
       return "";
   }

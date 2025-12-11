@@ -52,7 +52,7 @@ function parseSlotMeta(key: string) {
   const match = key.match(/^(.+?)\s*\((.+)\)\s*$/);
   const label = (match ? match[1] : key).trim();
   const timeRange = (match ? match[2] : "").trim();
-  const isMeal = /breakfast|lunch/i.test(label);
+  const isMeal = /breakfast|lunch|dinner/i.test(label);
   return { label, timeRange, isMeal };
 }
 
