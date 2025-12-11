@@ -14,11 +14,12 @@ const TASK_DESC_PROPERTY_KEY = "Description"; // rich_text
 const TASK_STATUS_PROPERTY_KEY = "Status";    // select
 const TASK_PHOTOS_PROPERTY_KEY = "Photos";    // files
 const TASK_TYPE_PROPERTY_KEY = "Task Type";   // select
+const TASK_LINKS_PROPERTY_KEY = "Links";      // rich_text or url
+const TASK_ESTIMATE_PROPERTY_KEY = "Estimated Time"; // rich_text or text
 
 function getPlainText(prop: any): string {
   if (!prop) return "";
 
-  // NEW: handle raw rich_text arrays (like comments)
   if (Array.isArray(prop)) {
     return prop
       .map((t: any) => t.plain_text || "")
@@ -26,7 +27,6 @@ function getPlainText(prop: any): string {
       .trim();
   }
 
-  // Existing property handling
   switch (prop.type) {
     case "title":
       return (prop.title || [])
@@ -45,6 +45,8 @@ function getPlainText(prop: any): string {
         .map((s: any) => s.name || "")
         .join(", ")
         .trim();
+    case "url":
+      return prop.url || "";
     case "files":
       return (prop.files || [])
         .map((f: any) => f.name || "")
@@ -60,6 +62,26 @@ function getPlainText(prop: any): string {
       }
       return "";
   }
+}
+
+function parseLinks(raw: string): { label: string; url: string }[] {
+  if (!raw.trim()) return [];
+
+  return raw
+    .split(",")
+    .map((entry) => entry.trim())
+    .filter(Boolean)
+    .map((entry) => {
+      const bracketMatch = entry.match(/^\[(.+?)\](.+)$/);
+      if (bracketMatch) {
+        return {
+          label: bracketMatch[1].trim(),
+          url: bracketMatch[2].trim(),
+        };
+      }
+
+      return { label: entry, url: entry };
+    });
 }
 
 async function findTaskPageByName(name: string) {
@@ -114,6 +136,7 @@ export async function GET(req: Request) {
     const pageName = getPlainText(props[TASK_NAME_PROPERTY_KEY]) || name;
     const description = getPlainText(props[TASK_DESC_PROPERTY_KEY]);
     const status = getPlainText(props[TASK_STATUS_PROPERTY_KEY]);
+    const links = parseLinks(getPlainText(props[TASK_LINKS_PROPERTY_KEY]));
     const typeProp = props[TASK_TYPE_PROPERTY_KEY];
     const taskType =
       typeProp?.type === "select"
@@ -123,13 +146,27 @@ export async function GET(req: Request) {
           }
         : { name: "", color: "default" };
     const photosProp = props[TASK_PHOTOS_PROPERTY_KEY];
-    const photos =
+    const media =
       photosProp?.type === "files"
-        ? (photosProp.files || []).map((file: any) => ({
-            name: file.name || "Attachment",
-            url: file.external?.url || file.file?.url || "",
-          }))
+        ? (photosProp.files || []).map((file: any) => {
+            const name = file.name || "Attachment";
+            const url = file.external?.url || file.file?.url || "";
+            const lower = name.toLowerCase();
+            let kind: "image" | "video" | "audio" | "file" = "file";
+
+            if (/(\.png|\.jpe?g|\.gif|\.webp|\.avif)$/i.test(lower)) {
+              kind = "image";
+            } else if (/(\.mp4|\.mov|\.m4v)$/i.test(lower)) {
+              kind = "video";
+            } else if (/(\.mp3|\.wav|\.m4a)$/i.test(lower)) {
+              kind = "audio";
+            }
+
+            return { name, url, kind };
+          })
         : [];
+
+    const estimatedTime = getPlainText(props[TASK_ESTIMATE_PROPERTY_KEY]) || "";
 
     const commentsRaw = await retrieveComments(page.id);
     const comments = (commentsRaw.results || []).map((c: any) => {
@@ -153,14 +190,16 @@ export async function GET(req: Request) {
       name: pageName,
       description: description || "",
       status: status || "",
+      links,
       taskType,
-      photos,
+      media,
+      estimatedTime,
       comments,
     });
   } catch (err) {
-    console.error("Failed to fetch task details from Notion:", err);
+    console.error("Failed to add comment:", err);
     return NextResponse.json(
-      { error: "Failed to fetch task details" },
+      { error: "Failed to add comment" },
       { status: 500 }
     );
   }
