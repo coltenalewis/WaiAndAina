@@ -114,18 +114,21 @@ export default function HubSchedulePage() {
     return result;
   }, [data]);
 
-  // "Now" column
   useEffect(() => {
-    if (!data) return;
-
-    function updateCurrentSlot() {
+    function updateCurrentSlot(schedule: ScheduleResponse | null) {
       const minutesNow = getNowMinutes();
       let activeId: string | null = null;
 
-      for (const slot of data.slots) {
+      if (!schedule) {
+        setCurrentSlotId(null);
+        return;
+      }
+
+      for (const slot of schedule.slots) {
         if (!slot.timeRange) continue;
         const range = parseTimeRange(slot.timeRange);
         if (!range) continue;
+
         if (
           minutesNow >= range.startMinutes &&
           minutesNow < range.endMinutes
@@ -138,8 +141,11 @@ export default function HubSchedulePage() {
       setCurrentSlotId(activeId);
     }
 
-    updateCurrentSlot();
-    const interval = setInterval(updateCurrentSlot, 60_000);
+    // run once immediately with the latest data
+    updateCurrentSlot(data);
+
+    // then update every minute, using the latest data from this effect
+    const interval = setInterval(() => updateCurrentSlot(data), 60_000);
     return () => clearInterval(interval);
   }, [data]);
 
