@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { loadSession } from "@/lib/session";
 import type { TaskMeta } from "./types";
 
@@ -55,6 +55,7 @@ export default function HubSchedulePage() {
   const [currentSlotId, setCurrentSlotId] = useState<string | null>(null);
   const [onlineUsers, setOnlineUsers] = useState<string[]>([]);
   const [newlyOnline, setNewlyOnline] = useState<Record<string, boolean>>({});
+  const scheduleScrollRef = useRef<HTMLDivElement | null>(null);
 
   const [activeView, setActiveView] = useState<"schedule" | "myTasks">(
     "schedule"
@@ -242,6 +243,13 @@ export default function HubSchedulePage() {
 
     return result;
   }, [data]);
+
+  const scrollSchedule = (direction: "left" | "right") => {
+    const node = scheduleScrollRef.current;
+    if (!node) return;
+    const delta = direction === "left" ? -320 : 320;
+    node.scrollBy({ left: delta, behavior: "smooth" });
+  };
 
   useEffect(() => {
     function updateCurrentSlot(schedule: ScheduleResponse | null) {
@@ -585,15 +593,38 @@ export default function HubSchedulePage() {
                 workSlots.length > 0 &&
                 activeView === "schedule" && (
                   <>
-                    <div className="overflow-x-auto">
-                      <ScheduleGrid
-                        data={data}
-                        workSlots={workSlots}
-                        currentUserName={currentUserName}
-                        currentSlotId={currentSlotId}
-                        onTaskClick={handleTaskClick}
-                        statusMap={taskMetaMap}
-                      />
+                    <div className="relative">
+                      <div className="pointer-events-none absolute inset-y-0 left-0 right-0 z-10 flex items-center justify-between px-2 sm:hidden">
+                        <button
+                          type="button"
+                          onClick={() => scrollSchedule("left")}
+                          className="pointer-events-auto rounded-full bg-white/90 border border-[#d0c9a4] shadow px-2 py-2 text-[#4b522d] hover:-translate-x-0.5 transition"
+                          aria-label="Scroll schedule left"
+                        >
+                          ←
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => scrollSchedule("right")}
+                          className="pointer-events-auto rounded-full bg-white/90 border border-[#d0c9a4] shadow px-2 py-2 text-[#4b522d] hover:translate-x-0.5 transition"
+                          aria-label="Scroll schedule right"
+                        >
+                          →
+                        </button>
+                      </div>
+                      <div
+                        ref={scheduleScrollRef}
+                        className="overflow-x-auto scroll-smooth pb-2"
+                      >
+                        <ScheduleGrid
+                          data={data}
+                          workSlots={workSlots}
+                          currentUserName={currentUserName}
+                          currentSlotId={currentSlotId}
+                          onTaskClick={handleTaskClick}
+                          statusMap={taskMetaMap}
+                        />
+                      </div>
                     </div>
                   </>
                 )}
