@@ -31,6 +31,20 @@ type TaskClickPayload = {
   groupNames: string[];  // all people sharing that merged box
 };
 
+type TaskComment = {
+  id: string;
+  text: string;
+  createdTime: string;
+  author: string;
+};
+
+type TaskDetails = {
+  name: string;
+  description: string;
+  status: string;
+  comments: TaskComment[];
+};
+
 export default function HubSchedulePage() {
   const [data, setData] = useState<ScheduleResponse | null>(null);
   const [loading, setLoading] = useState(true);
@@ -40,8 +54,17 @@ export default function HubSchedulePage() {
 
   // Modal state
   const [modalTask, setModalTask] = useState<TaskClickPayload | null>(null);
-  const [modalDescription, setModalDescription] = useState<string | null>(null);
+  const [modalDetails, setModalDetails] = useState<TaskDetails | null>(null);
   const [modalLoading, setModalLoading] = useState(false);
+  const [commentDraft, setCommentDraft] = useState("");
+  const [commentSubmitting, setCommentSubmitting] = useState(false);
+
+  const statusOptions = [
+    "Not Started",
+    "Incomplete",
+    "In Progress",
+    "Completed",
+  ];
 
   // Get logged-in user from session
   useEffect(() => {
@@ -149,39 +172,108 @@ export default function HubSchedulePage() {
     return () => clearInterval(interval);
   }, [data]);
 
-  // When a task box is clicked
-  async function handleTaskClick(payload: TaskClickPayload) {
-    setModalTask(payload);
-    setModalDescription(null);
+  async function loadTaskDetails(taskName: string) {
     setModalLoading(true);
 
     try {
-      const primaryTitle = payload.task.split("\n")[0].trim();
-      if (!primaryTitle) {
-        setModalDescription(null);
+      const res = await fetch(`/api/task?name=${encodeURIComponent(taskName)}`);
+      if (!res.ok) {
+        setModalDetails({
+          name: taskName,
+          description: "",
+          status: "",
+          comments: [],
+        });
         return;
       }
 
-      const res = await fetch(
-        `/api/task?name=${encodeURIComponent(primaryTitle)}`
-      );
-      if (!res.ok) {
-        setModalDescription(null);
-        return;
-      }
-      const data = await res.json();
-      setModalDescription(data.description || "");
+      const json = await res.json();
+      setModalDetails({
+        name: json.name || taskName,
+        description: json.description || "",
+        status: json.status || "",
+        comments: json.comments || [],
+      });
     } catch (e) {
       console.error("Failed to load task details:", e);
-      setModalDescription(null);
+      setModalDetails({
+        name: taskName,
+        description: "",
+        status: "",
+        comments: [],
+      });
     } finally {
       setModalLoading(false);
     }
   }
 
+  async function updateTaskStatus(newStatus: string, taskName: string) {
+    setModalDetails((prev) =>
+      prev ? { ...prev, status: newStatus } : prev
+    );
+
+    try {
+      await fetch("/api/task", {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ name: taskName, status: newStatus }),
+      });
+    } catch (e) {
+      console.error("Failed to update task status:", e);
+    }
+  }
+
+  async function submitTaskComment(taskName: string) {
+    if (!commentDraft.trim()) return;
+    setCommentSubmitting(true);
+
+    try {
+      const comment = commentDraft.trim();
+      const res = await fetch("/api/task", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ name: taskName, comment }),
+      });
+
+      if (res.ok) {
+        setCommentDraft("");
+        await loadTaskDetails(taskName);
+      }
+    } catch (e) {
+      console.error("Failed to add comment:", e);
+    } finally {
+      setCommentSubmitting(false);
+    }
+  }
+
+  // When a task box is clicked
+  async function handleTaskClick(payload: TaskClickPayload) {
+    setModalTask(payload);
+    setModalDetails(null);
+    setCommentDraft("");
+
+    const primaryTitle = payload.task.split("\n")[0].trim();
+    if (!primaryTitle) {
+      setModalDetails({
+        name: payload.task,
+        description: "",
+        status: "",
+        comments: [],
+      });
+      return;
+    }
+
+    await loadTaskDetails(primaryTitle);
+  }
+
   function closeModal() {
     setModalTask(null);
-    setModalDescription(null);
+    setModalDetails(null);
+    setCommentDraft("");
   }
 
   return (
@@ -227,7 +319,7 @@ export default function HubSchedulePage() {
           </p>
 
           <div className="mt-3 rounded-lg bg-[#a0b764] px-3 py-3">
-            <div className="overflow-x-auto rounded-md bg-[#f8f4e3]">
+            <div className="rounded-md bg-[#f8f4e3]">
               {loading && (
                 <div className="px-4 py-6 text-sm text-center text-[#7a7f54]">
                   Loading schedule…
@@ -240,13 +332,25 @@ export default function HubSchedulePage() {
               )}
 
               {!loading && !error && data && workSlots.length > 0 && (
-                <ScheduleGrid
-                  data={data}
-                  workSlots={workSlots}
-                  currentUserName={currentUserName}
-                  currentSlotId={currentSlotId}
-                  onTaskClick={handleTaskClick}
-                />
+                <>
+                  <div className="hidden md:block overflow-x-auto">
+                    <ScheduleGrid
+                      data={data}
+                      workSlots={workSlots}
+                      currentUserName={currentUserName}
+                      currentSlotId={currentSlotId}
+                      onTaskClick={handleTaskClick}
+                    />
+                  </div>
+                  <div className="md:hidden">
+                    <ScheduleGridMobile
+                      data={data}
+                      workSlots={workSlots}
+                      currentSlotId={currentSlotId}
+                      onTaskClick={handleTaskClick}
+                    />
+                  </div>
+                </>
               )}
 
               {!loading && !error && data && workSlots.length === 0 && (
@@ -269,7 +373,7 @@ export default function HubSchedulePage() {
             className="w-full max-w-lg rounded-2xl bg-[#f8f4e3] border border-[#d0c9a4] px-6 py-5 shadow-2xl transform transition-all duration-200 ease-out scale-100 opacity-100"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="flex items-start justify-between gap-4 mb-3">
+            <div className="flex items-start justify-between gap-4 mb-4">
               <div>
                 <div className="text-xs uppercase tracking-[0.16em] text-[#7a7f54]">
                   {modalTask.slot.label}
@@ -293,75 +397,166 @@ export default function HubSchedulePage() {
               </button>
             </div>
 
-            {/* Full cell text (if there are extra lines) */}
-            {modalTask.task.includes("\n") && (
-              <div className="mb-3 whitespace-pre-line text-[11px] leading-snug text-[#44422f] bg-[#f1edd8] border border-[#dfd6b3] rounded-md px-3 py-2">
-                {modalTask.task
-                  .split("\n")
-                  .slice(1)
-                  .join("\n")
-                  .trim() || "No additional notes."}
+            <div className="space-y-4">
+              <div className="rounded-lg border border-[#e2d7b5] bg-white/70 px-4 py-3 space-y-3">
+                {modalTask.task.includes("\n") && (
+                  <div className="whitespace-pre-line text-[11px] leading-snug text-[#44422f] bg-[#f1edd8] border border-[#dfd6b3] rounded-md px-3 py-2">
+                    {modalTask.task
+                      .split("\n")
+                      .slice(1)
+                      .join("\n")
+                      .trim() || "No additional notes."}
+                  </div>
+                )}
+
+                <div className="space-y-1">
+                  <p className="text-[10px] uppercase tracking-[0.12em] text-[#8a8256]">
+                    Task description
+                  </p>
+                  {modalLoading ? (
+                    <p className="text-[11px] italic text-[#8e875d]">
+                      Loading task details…
+                    </p>
+                  ) : modalDetails?.description ? (
+                    <p className="text-[12px] leading-snug text-[#4f4b33]">
+                      {modalDetails.description}
+                    </p>
+                  ) : (
+                    <p className="text-[11px] italic text-[#a19a70]">
+                      No extra description available yet.
+                    </p>
+                  )}
+                </div>
+
+                <div className="text-[11px] text-[#666242]">
+                  {(() => {
+                    const me = modalTask.person.toLowerCase();
+                    const others = modalTask.groupNames.filter(
+                      (n) => n.toLowerCase() !== me
+                    );
+
+                    if (others.length === 0) {
+                      return (
+                        <span>
+                          <span className="font-semibold">Assigned with:</span>{" "}
+                          (no one else – solo task)
+                        </span>
+                      );
+                    }
+
+                    return (
+                      <span>
+                        <span className="font-semibold">Assigned with:</span>{" "}
+                        {others.join(", ")}
+                      </span>
+                    );
+                  })()}
+                </div>
               </div>
-            )}
 
-            {/* Description from Tasks DB */}
-            <div className="mt-2">
-              {modalLoading ? (
-                <p className="text-[11px] italic text-[#8e875d]">
-                  Loading task description…
-                </p>
-              ) : modalDescription ? (
-                <p className="text-[11px] italic text-[#6f6a4a]">
-                  {modalDescription}
-                </p>
-              ) : (
-                <p className="text-[11px] italic text-[#a19a70]">
-                  No extra description available yet.
-                </p>
-              )}
-            </div>
+              <div className="rounded-lg border border-[#e2d7b5] bg-white/70 px-4 py-3 space-y-3">
+                <div>
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-[10px] uppercase tracking-[0.12em] text-[#8a8256]">
+                        Comments
+                      </p>
+                      <p className="text-[11px] text-[#6a6748]">
+                        This is for comments, feedback, concerns, and request.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+                <div className="max-h-40 space-y-2 overflow-y-auto pr-1">
+                  {modalLoading && (
+                    <p className="text-[11px] italic text-[#8e875d]">
+                      Loading comments…
+                    </p>
+                  )}
+                  {!modalLoading && modalDetails?.comments?.length === 0 && (
+                    <p className="text-[11px] text-[#7a7f54] italic">
+                      No comments yet.
+                    </p>
+                  )}
+                  {!modalLoading &&
+                    modalDetails?.comments?.map((comment) => (
+                      <div
+                        key={comment.id}
+                        className="rounded-md border border-[#e1d8b6] bg-[#f7f3de] px-3 py-2"
+                      >
+                        <p className="text-[12px] text-[#3f3c2d] leading-snug">
+                          {comment.text || "(No text)"}
+                        </p>
+                        <p className="mt-1 text-[10px] text-[#8a8256]">
+                          {comment.author || "Unknown"} • {new Date(comment.createdTime).toLocaleString()}
+                        </p>
+                      </div>
+                    ))}
+                </div>
 
-            {/* Assigned with */}
-            <div className="mt-4 text-[11px] text-[#666242]">
-              {(() => {
-                const me = modalTask.person.toLowerCase();
-                const others = modalTask.groupNames.filter(
-                  (n) => n.toLowerCase() !== me
-                );
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                  <input
+                    type="text"
+                    value={commentDraft}
+                    onChange={(e) => setCommentDraft(e.target.value)}
+                    placeholder="Add a comment"
+                    className="flex-1 rounded-md border border-[#d0c9a4] bg-white px-3 py-2 text-sm text-[#3f3c2d] shadow-inner focus:outline-none focus:ring-2 focus:ring-[#8fae4c]"
+                  />
+                  <button
+                    type="button"
+                    onClick={() =>
+                      submitTaskComment(modalDetails?.name || modalTask.task)
+                    }
+                    disabled={commentSubmitting || !commentDraft.trim()}
+                    className="w-full sm:w-auto rounded-md bg-[#a0b764] px-4 py-2 text-xs font-semibold uppercase tracking-[0.12em] text-[#f9f9ec] shadow-md hover:bg-[#95ad5e] disabled:opacity-60"
+                  >
+                    {commentSubmitting ? "Posting…" : "Post"}
+                  </button>
+                </div>
+              </div>
 
-                if (others.length === 0) {
-                  return (
-                    <span>
-                      <span className="font-semibold">Assigned with:</span>{" "}
-                      (no one else – solo task)
-                    </span>
-                  );
-                }
+              <div className="rounded-lg border border-[#e2d7b5] bg-white/70 px-4 py-3 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-[10px] uppercase tracking-[0.12em] text-[#8a8256]">
+                      Status update
+                    </p>
+                    <p className="text-[11px] text-[#6a6748]">
+                      Choose a status to update this task in Notion.
+                    </p>
+                  </div>
+                </div>
+                <select
+                  value={modalDetails?.status || ""}
+                  onChange={(e) =>
+                    updateTaskStatus(
+                      e.target.value,
+                      modalDetails?.name || modalTask.task
+                    )
+                  }
+                  className="w-full rounded-md border border-[#d0c9a4] bg-white px-3 py-2 text-sm text-[#3f3c2d] shadow-inner focus:outline-none focus:ring-2 focus:ring-[#8fae4c]"
+                  disabled={!modalDetails || modalLoading}
+                >
+                  <option value="" disabled>
+                    Select a status
+                  </option>
+                  {statusOptions.map((option) => (
+                    <option key={option} value={option}>
+                      {option}
+                    </option>
+                  ))}
+                </select>
+              </div>
 
-                return (
-                  <span>
-                    <span className="font-semibold">Assigned with:</span>{" "}
-                    {others.join(", ")}
-                  </span>
-                );
-              })()}
-            </div>
-
-            {/* Actions */}
-            <div className="mt-5 flex justify-end gap-3">
-              <button
-                type="button"
-                onClick={closeModal}
-                className="rounded-md border border-[#d0c9a4] bg-white/80 px-3 py-1.5 text-xs font-medium text-[#6b6b4a] hover:bg-[#ece7d0]"
-              >
-                Close
-              </button>
-              <button
-                type="button"
-                className="rounded-md bg-[#a0b764] px-4 py-1.5 text-xs font-semibold uppercase tracking-[0.12em] text-[#f9f9ec] shadow-md hover:bg-[#95ad5e] disabled:opacity-60"
-              >
-                Mark as complete
-              </button>
+              <div className="flex justify-end">
+                <button
+                  type="button"
+                  onClick={closeModal}
+                  className="rounded-md border border-[#d0c9a4] bg-white/80 px-4 py-2 text-xs font-medium text-[#6b6b4a] hover:bg-[#ece7d0]"
+                >
+                  Close
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -693,6 +888,113 @@ function ScheduleGrid({
         })}
       </tbody>
     </table>
+  );
+}
+
+function ScheduleGridMobile({
+  data,
+  workSlots,
+  currentSlotId,
+  onTaskClick,
+}: {
+  data: ScheduleResponse;
+  workSlots: Slot[];
+  currentSlotId: string | null;
+  onTaskClick?: (payload: TaskClickPayload) => void;
+}) {
+  const slotIndexMap: Record<string, number> = {};
+  data.slots.forEach((slot, idx) => {
+    slotIndexMap[slot.id] = idx;
+  });
+
+  return (
+    <div className="space-y-3">
+      {data.people.map((person, rowIdx) => (
+        <div
+          key={person}
+          className="rounded-lg border border-[#d1d4aa] bg-[#faf8ea] shadow-sm"
+        >
+          <div className="flex items-center justify-between border-b border-[#d1d4aa] px-3 py-2">
+            <p className="text-sm font-semibold text-[#4f5730]">{person}</p>
+            <span className="text-[11px] uppercase tracking-[0.12em] text-[#7a7f54]">
+              Tasks
+            </span>
+          </div>
+          <div className="space-y-2 px-3 pb-3 pt-2">
+            {workSlots.map((slot) => {
+              const slotIndex = slotIndexMap[slot.id];
+              const task = (data.cells[rowIdx]?.[slotIndex] ?? "").trim();
+              if (!task) return null;
+
+              const groupNames = data.people.filter((_, idx) => {
+                const candidate = (data.cells[idx]?.[slotIndex] ?? "").trim();
+                return candidate && candidate === task;
+              });
+
+              const isCurrent = slot.id === currentSlotId;
+
+              return (
+                <button
+                  key={`${person}-${slot.id}`}
+                  type="button"
+                  onClick={() =>
+                    onTaskClick?.({
+                      person,
+                      slot,
+                      task,
+                      groupNames,
+                    })
+                  }
+                  className={`w-full rounded-md border px-3 py-2 text-left shadow-sm transition bg-white ${
+                    isCurrent ? "border-[#b8c98a]" : "border-[#e2d7b5]"
+                  }`}
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div>
+                      <p className="text-[11px] uppercase tracking-[0.12em] text-[#7a7f54]">
+                        {slot.label}
+                      </p>
+                      {slot.timeRange && (
+                        <p className="text-[10px] text-[#8a8256]">{slot.timeRange}</p>
+                      )}
+                    </div>
+                    {isCurrent && (
+                      <span className="mt-1 inline-flex items-center rounded-full bg-[#eef5dd] px-2 py-[1px] text-[10px] font-semibold text-[#476524]">
+                        Now
+                      </span>
+                    )}
+                  </div>
+                  <div className="mt-1 text-sm font-semibold text-[#3f4630]">
+                    {task.split("\n")[0].trim()}
+                  </div>
+                  {task.includes("\n") && (
+                    <div className="mt-1 whitespace-pre-line text-[11px] text-[#55513a]">
+                      {task
+                        .split("\n")
+                        .slice(1)
+                        .join("\n")}
+                    </div>
+                  )}
+                  <p className="mt-1 text-[11px] text-[#6a6748]">
+                    With {groupNames.join(", ")}
+                  </p>
+                </button>
+              );
+            })}
+
+            {workSlots.every((slot) => {
+              const idx = slotIndexMap[slot.id];
+              const task = (data.cells[rowIdx]?.[idx] ?? "").trim();
+              return !task;
+            }) && (
+              <p className="text-[11px] text-[#7a7f54] italic">
+                No tasks scheduled for this person.
+              </p>
+            )}
+          </div>
+        </div>
+      ))}
+    </div>
   );
 }
 
