@@ -660,28 +660,28 @@ export default function HubSchedulePage() {
   }
 
   // When a task box is clicked
-  async function handleTaskClick(payload: TaskClickPayload) {
-    setModalTask(payload);
-    setModalDetails(null);
-    setCommentDraft("");
+async function handleTaskClick(payload: TaskClickPayload) {
+  setModalTask(payload);
+  setModalDetails(null);
+  setCommentDraft("");
 
-    const primaryTitle = payload.task.split("\n")[0].trim();
-    if (!primaryTitle) {
-      setModalDetails({
-        name: payload.task,
-        description: "",
-        status: "",
-        comments: [],
-        photos: [],
-      });
-      return;
-    }
+  const primaryTitle = (payload.task || "").split("\n")[0].trim();
 
-    const primaryTitle = (payload.task || "").split("\n")[0].trim();
-if (!primaryTitle) return;
-
-await loadTaskDetails(primaryTitle);
+  if (!primaryTitle) {
+    setModalDetails({
+      name: payload.task || "",
+      description: "",
+      status: "",
+      comments: [],
+      photos: [],
+      taskType: { name: "", color: "default" },
+    });
+    return;
   }
+
+  await loadTaskDetails(primaryTitle);
+}
+
 
   function closeModal() {
     setModalTask(null);
