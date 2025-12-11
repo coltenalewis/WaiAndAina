@@ -97,14 +97,6 @@ export async function GET(req: Request) {
     const pageName = getPlainText(props[TASK_NAME_PROPERTY_KEY]) || name;
     const description = getPlainText(props[TASK_DESC_PROPERTY_KEY]);
     const status = getPlainText(props[TASK_STATUS_PROPERTY_KEY]);
-    const photosProp = props[TASK_PHOTOS_PROPERTY_KEY];
-    const photos =
-      photosProp?.type === "files"
-        ? (photosProp.files || []).map((file: any) => ({
-            name: file.name || "Attachment",
-            url: file.external?.url || file.file?.url || "",
-          }))
-        : [];
 
     const commentsRaw = await retrieveComments(page.id);
     const comments = (commentsRaw.results || []).map((c: any) => ({
@@ -119,7 +111,6 @@ export async function GET(req: Request) {
       name: pageName,
       description: description || "",
       status: status || "",
-      photos,
       comments,
     });
   } catch (err) {
@@ -140,11 +131,11 @@ export async function PATCH(req: Request) {
   }
 
   const body = await req.json().catch(() => null);
-  const { name, status, photos } = body || {};
+  const { name, status } = body || {};
 
-  if (!name || (!status && !photos)) {
+  if (!name || !status) {
     return NextResponse.json(
-      { error: "Missing task name, status, or photos" },
+      { error: "Missing task name or status" },
       { status: 400 }
     );
   }
@@ -158,26 +149,11 @@ export async function PATCH(req: Request) {
       );
     }
 
-    const properties: Record<string, any> = {};
+    await updatePage(page.id, {
+      [TASK_STATUS_PROPERTY_KEY]: { select: { name: status } },
+    });
 
-    if (status) {
-      properties[TASK_STATUS_PROPERTY_KEY] = { select: { name: status } };
-    }
-
-    if (photos && Array.isArray(photos)) {
-      properties[TASK_PHOTOS_PROPERTY_KEY] = {
-        files: photos
-          .filter((p: any) => p?.url)
-          .map((p: any, idx: number) => ({
-            name: p.name || `Photo ${idx + 1}`,
-            external: { url: p.url },
-          })),
-      };
-    }
-
-    await updatePage(page.id, properties);
-
-    return NextResponse.json({ success: true, status, photos });
+    return NextResponse.json({ success: true, status });
   } catch (err) {
     console.error("Failed to update task status:", err);
     return NextResponse.json(
