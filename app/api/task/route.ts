@@ -52,6 +52,13 @@ function getPlainText(prop: any): string {
         .join(", ")
         .trim();
     default:
+      // Optional: final fallback if we get raw { rich_text: [...] } without type
+      if (Array.isArray(prop.rich_text)) {
+        return prop.rich_text
+          .map((t: any) => t.plain_text || "")
+          .join("")
+          .trim();
+      }
       return "";
   }
 }
