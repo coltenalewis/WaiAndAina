@@ -53,6 +53,13 @@ function getPlainText(prop: any): string {
         .join(", ")
         .trim();
     default:
+      // Optional: final fallback if we get raw { rich_text: [...] } without type
+      if (Array.isArray(prop.rich_text)) {
+        return prop.rich_text
+          .map((t: any) => t.plain_text || "")
+          .join("")
+          .trim();
+      }
       return "";
   }
 }
@@ -190,9 +197,9 @@ export async function GET(req: Request) {
       comments,
     });
   } catch (err) {
-    console.error("Failed to fetch task details from Notion:", err);
+    console.error("Failed to add comment:", err);
     return NextResponse.json(
-      { error: "Failed to fetch task details" },
+      { error: "Failed to add comment" },
       { status: 500 }
     );
   }
