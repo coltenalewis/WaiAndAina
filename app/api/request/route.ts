@@ -22,6 +22,13 @@ const MAX_DESCRIPTION_CHARS = 500;
 function getPlainText(prop: any): string {
   if (!prop) return "";
 
+  if (Array.isArray(prop)) {
+    return prop
+      .map((t: any) => t.plain_text || "")
+      .join("")
+      .trim();
+  }
+
   switch (prop.type) {
     case "title":
       return (prop.title || [])

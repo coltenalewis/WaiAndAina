@@ -144,3 +144,45 @@ export async function createComment(blockId: string, richText: any[]) {
 
   return res.json();
 }
+
+export async function listBlockChildren(
+  blockId: string,
+  startCursor?: string
+) {
+  const search = startCursor ? `?start_cursor=${encodeURIComponent(startCursor)}` : "";
+
+  const res = await fetch(
+    `${NOTION_BASE_URL}/blocks/${blockId}/children${search}`,
+    {
+      headers: {
+        Authorization: `Bearer ${NOTION_TOKEN}`,
+        "Notion-Version": NOTION_VERSION,
+      },
+    }
+  );
+
+  if (!res.ok) {
+    const text = await res.text();
+    console.error("Notion block children error:", res.status, text);
+    throw new Error(`Failed to fetch block children: ${res.status}`);
+  }
+
+  return res.json();
+}
+
+export async function retrieveBlock(blockId: string) {
+  const res = await fetch(`${NOTION_BASE_URL}/blocks/${blockId}`, {
+    headers: {
+      Authorization: `Bearer ${NOTION_TOKEN}`,
+      "Notion-Version": NOTION_VERSION,
+    },
+  });
+
+  if (!res.ok) {
+    const text = await res.text();
+    console.error("Notion retrieve block error:", res.status, text);
+    throw new Error(`Failed to retrieve Notion block: ${res.status}`);
+  }
+
+  return res.json();
+}

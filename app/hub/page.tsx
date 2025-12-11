@@ -45,6 +45,7 @@ type TaskDetails = {
   status: string;
   comments: TaskComment[];
   photos: { name: string; url: string }[];
+  links?: { label: string; url: string }[];
   taskType?: { name: string; color: string };
 };
 
@@ -326,6 +327,33 @@ export default function HubSchedulePage() {
     [combineSlotAssignments, weekendSlots]
   );
 
+  const userHasTasksForSlots = useCallback(
+    (slots: Slot[]) => {
+      if (!data || !currentUserName) return false;
+
+      const me = currentUserName.trim().toLowerCase();
+      const rowIdx = data.people.findIndex(
+        (person) => person.trim().toLowerCase() === me
+      );
+
+      if (rowIdx === -1) return false;
+
+      return slots.some((slot) => {
+        const slotIdx = data.slots.findIndex((s) => s.id === slot.id);
+        if (slotIdx === -1) return false;
+
+        const cell = (data.cells[rowIdx]?.[slotIdx] ?? "").trim();
+        return splitCellTasks(cell).length > 0;
+      });
+    },
+    [data, currentUserName]
+  );
+
+  const showEveningSection =
+    eveningCombined.length > 0 && userHasTasksForSlots(eveningSlots);
+  const showWeekendSection =
+    weekendCombined.length > 0 && userHasTasksForSlots(weekendSlots);
+
   const myTasks = useMemo(() => {
     if (!data || !currentUserName) return [] as {
       slot: Slot;
@@ -565,6 +593,7 @@ export default function HubSchedulePage() {
           status: "",
           comments: [],
           photos: [],
+          links: [],
           taskType: { name: "", color: "default" },
         });
         return;
@@ -577,6 +606,7 @@ export default function HubSchedulePage() {
         status: json.status || "",
         comments: json.comments || [],
         photos: json.photos || [],
+        links: json.links || [],
         taskType: json.taskType || { name: "", color: "default" },
       });
       const metaPayload = {
@@ -598,6 +628,7 @@ export default function HubSchedulePage() {
         status: "",
         comments: [],
         photos: [],
+        links: [],
         taskType: { name: "", color: "default" },
       });
     } finally {
@@ -657,6 +688,8 @@ export default function HubSchedulePage() {
     } finally {
       setCommentSubmitting(false);
     }
+
+    await loadTaskDetails(primaryTitle);
   }
 
   // When a task box is clicked
@@ -665,7 +698,7 @@ export default function HubSchedulePage() {
     setModalDetails(null);
     setCommentDraft("");
 
-    const primaryTitle = payload.task.split("\n")[0].trim();
+    const primaryTitle = taskBaseName(payload.task);
     if (!primaryTitle) {
       setModalDetails({
         name: payload.task,
@@ -673,6 +706,7 @@ export default function HubSchedulePage() {
         status: "",
         comments: [],
         photos: [],
+        links: [],
       });
       return;
     }
@@ -898,7 +932,7 @@ await loadTaskDetails(primaryTitle);
         {!loading &&
           !error &&
           data &&
-          eveningCombined.length > 0 && (
+          showEveningSection && (
             <section className="space-y-3">
               <h3 className="text-xl font-semibold tracking-[0.16em] uppercase text-[#5d7f3b]">
                 Evening Schedule
@@ -987,7 +1021,7 @@ await loadTaskDetails(primaryTitle);
         {!loading &&
           !error &&
           data &&
-          weekendCombined.length > 0 && (
+          showWeekendSection && (
             <section className="space-y-3">
               <h3 className="text-xl font-semibold tracking-[0.16em] uppercase text-[#5d7f3b]">
                 Weekend Schedule
@@ -1162,6 +1196,27 @@ await loadTaskDetails(primaryTitle);
                     </p>
                   )}
                 </div>
+
+                  {!modalLoading && modalDetails?.links?.length ? (
+                    <div className="space-y-2">
+                      <p className="text-[10px] uppercase tracking-[0.12em] text-[#8a8256]">
+                        Relevant Links
+                      </p>
+                      <div className="flex flex-wrap gap-2">
+                        {modalDetails.links.map((link) => (
+                        <a
+                          key={`${link.url}-${link.label}`}
+                          href={link.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1 rounded-full border border-[#cdd7ab] bg-white/80 px-3 py-1 text-[12px] font-semibold text-[#2f5ba0] underline underline-offset-2 hover:bg-[#f1edd8]"
+                        >
+                          {link.label || link.url}
+                        </a>
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
 
                 <div className="text-[11px] text-[#666242]">
                   {(() => {
