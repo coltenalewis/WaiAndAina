@@ -1314,12 +1314,12 @@ function ScheduleGrid({
                       style={{
                         minHeight: `${rowSpan[visualRow][cIdx] * baseRowHeight}px`,
                       }}
-                      className={`border border-[#d1d4aa] p-0 align-top h-full ${
-                        isCurrentCol ? "bg-[#f0f4de]" : ""
-                      }`}
-                    />
-                  );
-                }
+                    className={`border border-[#d1d4aa] p-1 align-top h-full ${
+                      isCurrentCol ? "bg-[#f0f4de]" : ""
+                    }`}
+                  />
+                );
+              }
 
                 const span = rowSpan[visualRow][cIdx];
                 const spanHeight = span * baseRowHeight;
@@ -1342,7 +1342,7 @@ function ScheduleGrid({
                     rowSpan={span}
                     colSpan={colSpan[visualRow][cIdx]}
                     style={{ minHeight: `${spanHeight}px` }}
-                    className={`border border-[#d1d4aa] p-0 align-top h-full ${
+                    className={`border border-[#d1d4aa] p-1 align-top h-full ${
                       isCurrentCol ? "bg-[#f0f4de]" : ""
                     }`}
                   >
