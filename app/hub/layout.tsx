@@ -62,16 +62,16 @@ export default function HubLayout({ children }: { children: ReactNode }) {
           {/* Center: nav tabs (scrollable on mobile) */}
           <nav className="order-3 sm:order-none -mx-3 sm:mx-0">
             <div className="flex items-center gap-2 sm:gap-4 overflow-x-auto px-3 sm:px-0 pb-1 sm:pb-0 scrollbar-thin scrollbar-thumb-[#b2c677]/70 scrollbar-track-transparent">
-              <HubLink href="/hub" active={isActive("/hub")}>
+              <HubLink href="/hub" active={isActive("/hub")}>            
                 Schedule
               </HubLink>
-              <HubLink href="/hub/request" active={isActive("/hub/request")}>
+              <HubLink href="/hub/request" active={isActive("/hub/request")}>            
                 Request
               </HubLink>
-              <HubLink href="/hub/admin" active={isActive("/hub/admin")}>
-                Admin
+              <HubLink href="/hub/goat" active={isActive("/hub/goat")}>            
+                Goat Run
               </HubLink>
-              <HubLink href="/hub/settings" active={isActive("/hub/settings")}>
+              <HubLink href="/hub/settings" active={isActive("/hub/settings")}>            
                 Settings
               </HubLink>
             </div>
