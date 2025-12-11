@@ -12,6 +12,7 @@ const TASKS_DB_ID = process.env.NOTION_TASKS_DATABASE_ID!;
 const TASK_NAME_PROPERTY_KEY = "Name";        // title
 const TASK_DESC_PROPERTY_KEY = "Description"; // rich_text
 const TASK_STATUS_PROPERTY_KEY = "Status";    // select
+const TASK_PHOTOS_PROPERTY_KEY = "Photos";    // files
 
 function getPlainText(prop: any): string {
   if (!prop) return "";
@@ -32,6 +33,11 @@ function getPlainText(prop: any): string {
     case "multi_select":
       return (prop.multi_select || [])
         .map((s: any) => s.name || "")
+        .join(", ")
+        .trim();
+    case "files":
+      return (prop.files || [])
+        .map((f: any) => f.name || "")
         .join(", ")
         .trim();
     default:
@@ -91,6 +97,14 @@ export async function GET(req: Request) {
     const pageName = getPlainText(props[TASK_NAME_PROPERTY_KEY]) || name;
     const description = getPlainText(props[TASK_DESC_PROPERTY_KEY]);
     const status = getPlainText(props[TASK_STATUS_PROPERTY_KEY]);
+    const photosProp = props[TASK_PHOTOS_PROPERTY_KEY];
+    const photos =
+      photosProp?.type === "files"
+        ? (photosProp.files || []).map((file: any) => ({
+            name: file.name || "Attachment",
+            url: file.external?.url || file.file?.url || "",
+          }))
+        : [];
 
     const commentsRaw = await retrieveComments(page.id);
     const comments = (commentsRaw.results || []).map((c: any) => ({
@@ -105,6 +119,7 @@ export async function GET(req: Request) {
       name: pageName,
       description: description || "",
       status: status || "",
+      photos,
       comments,
     });
   } catch (err) {
@@ -125,11 +140,11 @@ export async function PATCH(req: Request) {
   }
 
   const body = await req.json().catch(() => null);
-  const { name, status } = body || {};
+  const { name, status, photos } = body || {};
 
-  if (!name || !status) {
+  if (!name || (!status && !photos)) {
     return NextResponse.json(
-      { error: "Missing task name or status" },
+      { error: "Missing task name, status, or photos" },
       { status: 400 }
     );
   }
@@ -143,11 +158,26 @@ export async function PATCH(req: Request) {
       );
     }
 
-    await updatePage(page.id, {
-      [TASK_STATUS_PROPERTY_KEY]: { select: { name: status } },
-    });
+    const properties: Record<string, any> = {};
 
-    return NextResponse.json({ success: true, status });
+    if (status) {
+      properties[TASK_STATUS_PROPERTY_KEY] = { select: { name: status } };
+    }
+
+    if (photos && Array.isArray(photos)) {
+      properties[TASK_PHOTOS_PROPERTY_KEY] = {
+        files: photos
+          .filter((p: any) => p?.url)
+          .map((p: any, idx: number) => ({
+            name: p.name || `Photo ${idx + 1}`,
+            external: { url: p.url },
+          })),
+      };
+    }
+
+    await updatePage(page.id, properties);
+
+    return NextResponse.json({ success: true, status, photos });
   } catch (err) {
     console.error("Failed to update task status:", err);
     return NextResponse.json(
