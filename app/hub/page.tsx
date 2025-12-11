@@ -1392,6 +1392,118 @@ function ScheduleGrid({
   );
 }
 
+function ScheduleGridMobile({
+  data,
+  workSlots,
+  currentSlotId,
+  onTaskClick,
+  statusMap = {},
+}: {
+  data: ScheduleResponse;
+  workSlots: Slot[];
+  currentSlotId: string | null;
+  onTaskClick?: (payload: TaskClickPayload) => void;
+  statusMap?: Record<string, TaskMeta>;
+}) {
+  const slotIndexMap: Record<string, number> = {};
+  data.slots.forEach((slot, idx) => {
+    slotIndexMap[slot.id] = idx;
+  });
+
+  return (
+    <div className="space-y-3">
+      {data.people.map((person, rowIdx) => (
+        <div
+          key={person}
+          className="rounded-lg border border-[#d1d4aa] bg-[#faf8ea] shadow-sm"
+        >
+          <div className="flex items-center justify-between border-b border-[#d1d4aa] px-3 py-2">
+            <p className="text-sm font-semibold text-[#4f5730]">{person}</p>
+            <span className="text-[11px] uppercase tracking-[0.12em] text-[#7a7f54]">
+              Tasks
+            </span>
+          </div>
+          <div className="space-y-2 px-3 pb-3 pt-2">
+            {workSlots.map((slot) => {
+              const slotIndex = slotIndexMap[slot.id];
+              const task = (data.cells[rowIdx]?.[slotIndex] ?? "").trim();
+              if (!task) return null;
+
+              const groupNames = data.people.filter((_, idx) => {
+                const candidate = (data.cells[idx]?.[slotIndex] ?? "").trim();
+                return candidate && candidate === task;
+              });
+
+              const isCurrent = slot.id === currentSlotId;
+              const primaryTitle = task.split("\n")[0].trim();
+              const status = statusMap[primaryTitle]?.status || "";
+
+              return (
+                <button
+                  key={`${person}-${slot.id}`}
+                  type="button"
+                  onClick={() =>
+                    onTaskClick?.({
+                      person,
+                      slot,
+                      task,
+                      groupNames,
+                    })
+                  }
+                  className={`w-full rounded-md border px-3 py-2 text-left shadow-sm transition bg-white ${
+                    isCurrent ? "border-[#b8c98a]" : "border-[#e2d7b5]"
+                  }`}
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div>
+                        <p className="text-[11px] uppercase tracking-[0.12em] text-[#7a7f54]">
+                          {slot.label}
+                        </p>
+                        {slot.timeRange && (
+                          <p className="text-[10px] text-[#8a8256]">{slot.timeRange}</p>
+                        )}
+                      </div>
+                      <StatusBadge status={status} />
+                    {isCurrent && (
+                      <span className="mt-1 inline-flex items-center rounded-full bg-[#eef5dd] px-2 py-[1px] text-[10px] font-semibold text-[#476524]">
+                        Now
+                      </span>
+                    )}
+                  </div>
+                  <div className="mt-1 text-sm font-semibold text-[#3f4630]">
+                    {task.split("\n")[0].trim()}
+                  </div>
+                  {task.includes("\n") && (
+                    <div className="mt-1 whitespace-pre-line text-[11px] text-[#55513a]">
+                      {task
+                        .split("\n")
+                        .slice(1)
+                        .join("\n")}
+                    </div>
+                  )}
+                  <p className="mt-1 text-[11px] text-[#6a6748]">
+                    With {groupNames.join(", ")}
+                  </p>
+                </button>
+              );
+            })}
+
+            {workSlots.every((slot) => {
+              const idx = slotIndexMap[slot.id];
+              const task = (data.cells[rowIdx]?.[idx] ?? "").trim();
+              return !task;
+            }) && (
+              <p className="text-[11px] text-[#7a7f54] italic">
+                No tasks scheduled for this person.
+              </p>
+            )}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 /* ---------- Time helpers ---------- */
 
 function getNowMinutes(): number {
