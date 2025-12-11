@@ -274,7 +274,7 @@ export default function GoatRunPage() {
         </div>
         <div>
           <h1 className="text-2xl font-semibold text-[#3b4224]">Goat Run</h1>
-          <p className="text-sm text-[#556133]">A playful take on the offline dino dash — now with a spry goat and friendly fences.</p>
+          <p className="text-sm text-[#556133]">My free will compelled me to make this, ur welcome..</p>
         </div>
       </div>
 
