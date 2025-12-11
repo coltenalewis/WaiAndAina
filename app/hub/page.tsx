@@ -169,64 +169,6 @@ export default function HubSchedulePage() {
     })();
   }, [data, taskMetaMap]);
 
-  // Preload task status/description for tagging
-  useEffect(() => {
-    if (!data) return;
-
-    const uniqueTasks = new Set<string>();
-    data.cells.forEach((row) => {
-      row.forEach((cell) => {
-        const primary = cell.split("\n")[0].trim();
-        if (primary) uniqueTasks.add(primary);
-      });
-    });
-
-    const missing = Array.from(uniqueTasks).filter(
-      (name) => !taskMetaMap[name]
-    );
-    if (missing.length === 0) return;
-
-    (async () => {
-      const results = await Promise.all(
-        missing.map(async (name) => {
-          try {
-            const res = await fetch(
-              `/api/task?name=${encodeURIComponent(name)}`
-            );
-            if (!res.ok) return null;
-            const json = await res.json();
-            return {
-              key: json.name || name,
-              original: name,
-              status: json.status || "",
-              description: json.description || "",
-            } as const;
-          } catch (err) {
-            console.error("Failed to preload task meta", err);
-            return null;
-          }
-        })
-      );
-
-      setTaskMetaMap((prev) => {
-        const next = { ...prev } as Record<string, TaskMeta>;
-        results.forEach((item) => {
-          if (item) {
-            next[item.key] = {
-              status: item.status,
-              description: item.description,
-            };
-            next[item.original] = {
-              status: item.status,
-              description: item.description,
-            };
-          }
-        });
-        return next;
-      });
-    })();
-  }, [data, taskMetaMap]);
-
   // Split slots
   const mealSlots = useMemo(
     () => data?.slots.filter((s) => s.isMeal) ?? [],
