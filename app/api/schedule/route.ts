@@ -1,6 +1,6 @@
 // src/app/api/schedule/route.ts
 import { NextResponse } from "next/server";
-import { queryDatabase } from "@/lib/notion";
+import { queryDatabase, retrieveDatabase } from "@/lib/notion";
 
 const SCHEDULE_DB_ID = process.env.NOTION_SCHEDULE_DATABASE_ID!;
 
@@ -52,7 +52,7 @@ function parseSlotMeta(key: string) {
   const match = key.match(/^(.+?)\s*\((.+)\)\s*$/);
   const label = (match ? match[1] : key).trim();
   const timeRange = (match ? match[2] : "").trim();
-  const isMeal = /breakfast|lunch/i.test(label);
+  const isMeal = /breakfast|lunch|dinner/i.test(label);
   return { label, timeRange, isMeal };
 }
 
@@ -73,14 +73,21 @@ export async function GET() {
       return NextResponse.json(empty);
     }
 
-    // Use the first row's properties to determine ALL columns
-    const firstProps = pages[0].properties || {};
+    let slotKeys: string[] = [];
 
-    // All keys except the Person column are treated as time slots.
-    // Their order here will match the order Notion returns them in.
-    const slotKeys: string[] = Object.keys(firstProps).filter(
-      (key) => key !== PERSON_PROPERTY_KEY
-    );
+    try {
+      const dbMeta = await retrieveDatabase(SCHEDULE_DB_ID);
+      const metaProps = dbMeta?.properties || {};
+      slotKeys = Object.keys(metaProps)
+        .filter((key) => key !== PERSON_PROPERTY_KEY)
+        .sort((a, b) => a.localeCompare(b));
+    } catch (metaErr) {
+      console.error("Failed to retrieve database metadata, falling back to first row:", metaErr);
+      const firstProps = pages[0].properties || {};
+      slotKeys = Object.keys(firstProps)
+        .filter((key) => key !== PERSON_PROPERTY_KEY)
+        .sort((a, b) => a.localeCompare(b));
+    }
 
     // Build slot metadata
     const slots: Slot[] = slotKeys.map((key) => {
