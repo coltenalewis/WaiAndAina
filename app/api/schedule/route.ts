@@ -78,15 +78,15 @@ export async function GET() {
     try {
       const dbMeta = await retrieveDatabase(SCHEDULE_DB_ID);
       const metaProps = dbMeta?.properties || {};
-      slotKeys = Object.keys(metaProps).filter(
-        (key) => key !== PERSON_PROPERTY_KEY
-      );
+      slotKeys = Object.keys(metaProps)
+        .filter((key) => key !== PERSON_PROPERTY_KEY)
+        .sort((a, b) => a.localeCompare(b));
     } catch (metaErr) {
       console.error("Failed to retrieve database metadata, falling back to first row:", metaErr);
       const firstProps = pages[0].properties || {};
-      slotKeys = Object.keys(firstProps).filter(
-        (key) => key !== PERSON_PROPERTY_KEY
-      );
+      slotKeys = Object.keys(firstProps)
+        .filter((key) => key !== PERSON_PROPERTY_KEY)
+        .sort((a, b) => a.localeCompare(b));
     }
 
     // Build slot metadata
