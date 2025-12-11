@@ -936,13 +936,6 @@ function MealBlock({
             <button
               key={a.task}
               type="button"
-              onClick={() =>
-                console.log("Meal task clicked", {
-                  slot: slot.label,
-                  task: a.task,
-                  people: a.people,
-                })
-              }
               className={`w-full text-left rounded-md border px-3 py-2 flex items-center justify-between text-sm shadow-sm transition
                 ${
                   includesUser
