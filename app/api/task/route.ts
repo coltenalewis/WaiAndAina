@@ -13,6 +13,7 @@ const TASK_NAME_PROPERTY_KEY = "Name";        // title
 const TASK_DESC_PROPERTY_KEY = "Description"; // rich_text
 const TASK_STATUS_PROPERTY_KEY = "Status";    // select
 const TASK_PHOTOS_PROPERTY_KEY = "Photos";    // files
+const TASK_TYPE_PROPERTY_KEY = "Task Type";   // select
 
 function getPlainText(prop: any): string {
   if (!prop) return "";
@@ -113,6 +114,14 @@ export async function GET(req: Request) {
     const pageName = getPlainText(props[TASK_NAME_PROPERTY_KEY]) || name;
     const description = getPlainText(props[TASK_DESC_PROPERTY_KEY]);
     const status = getPlainText(props[TASK_STATUS_PROPERTY_KEY]);
+    const typeProp = props[TASK_TYPE_PROPERTY_KEY];
+    const taskType =
+      typeProp?.type === "select"
+        ? {
+            name: typeProp.select?.name || "",
+            color: typeProp.select?.color || "default",
+          }
+        : { name: "", color: "default" };
     const photosProp = props[TASK_PHOTOS_PROPERTY_KEY];
     const photos =
       photosProp?.type === "files"
@@ -144,6 +153,7 @@ export async function GET(req: Request) {
       name: pageName,
       description: description || "",
       status: status || "",
+      taskType,
       photos,
       comments,
     });

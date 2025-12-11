@@ -45,7 +45,44 @@ type TaskDetails = {
   status: string;
   comments: TaskComment[];
   photos: { name: string; url: string }[];
+  taskType?: { name: string; color: string };
 };
+
+type TaskTypeOption = { name: string; color: string };
+
+function splitCellTasks(cell: string): string[] {
+  if (!cell.trim()) return [];
+
+  const [firstLine, ...rest] = cell.split("\n");
+  const note = rest.join("\n").trim();
+
+  return firstLine
+    .split(",")
+    .map((t) => t.trim())
+    .filter(Boolean)
+    .map((t) => (note ? `${t}\n${note}` : t));
+}
+
+function taskBaseName(task: string): string {
+  return task.split("\n")[0].trim();
+}
+
+function typeColorClasses(color?: string) {
+  const map: Record<string, string> = {
+    default: "bg-[#e3e6bf] border-[#cfd2a1] text-[#3f4630]",
+    gray: "bg-gray-200 border-gray-300 text-gray-800",
+    brown: "bg-amber-200 border-amber-300 text-amber-900",
+    orange: "bg-orange-200 border-orange-300 text-orange-900",
+    yellow: "bg-yellow-200 border-yellow-300 text-yellow-900",
+    green: "bg-green-200 border-green-300 text-green-900",
+    blue: "bg-blue-200 border-blue-300 text-blue-900",
+    purple: "bg-purple-200 border-purple-300 text-purple-900",
+    pink: "bg-pink-200 border-pink-300 text-pink-900",
+    red: "bg-red-200 border-red-300 text-red-900",
+  };
+
+  return map[color || "default"] || map.default;
+}
 
 export default function HubSchedulePage() {
   const [data, setData] = useState<ScheduleResponse | null>(null);
@@ -62,6 +99,7 @@ export default function HubSchedulePage() {
   );
 
   const [taskMetaMap, setTaskMetaMap] = useState<Record<string, TaskMeta>>({});
+  const [taskTypes, setTaskTypes] = useState<TaskTypeOption[]>([]);
   
   // Modal state
   const [modalTask, setModalTask] = useState<TaskClickPayload | null>(null);
@@ -80,6 +118,29 @@ export default function HubSchedulePage() {
   useEffect(() => {
     const session = loadSession();
     if (session?.name) setCurrentUserName(session.name);
+  }, []);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetch("/api/task-types");
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const json = await res.json();
+        if (Array.isArray(json.types)) {
+          setTaskTypes(json.types as TaskTypeOption[]);
+          return;
+        }
+      } catch (err) {
+        console.error("Failed to load task types", err);
+      }
+
+      setTaskTypes([
+        { name: "General", color: "default" },
+        { name: "Animal Care", color: "green" },
+        { name: "Field Work", color: "orange" },
+        { name: "Maintenance", color: "blue" },
+      ]);
+    })();
   }, []);
 
   // Load schedule data from Notion-backed API (with auto-refresh)
@@ -119,8 +180,10 @@ export default function HubSchedulePage() {
     const uniqueTasks = new Set<string>();
     data.cells.forEach((row) => {
       row.forEach((cell) => {
-        const primary = cell.split("\n")[0].trim();
-        if (primary) uniqueTasks.add(primary);
+        splitCellTasks(cell).forEach((task) => {
+          const primary = taskBaseName(task);
+          if (primary) uniqueTasks.add(primary);
+        });
       });
     });
 
@@ -143,6 +206,8 @@ export default function HubSchedulePage() {
               original: name,
               status: json.status || "",
               description: json.description || "",
+              typeName: json.taskType?.name || "",
+              typeColor: json.taskType?.color || "default",
             } as const;
           } catch (err) {
             console.error("Failed to preload task meta", err);
@@ -158,10 +223,14 @@ export default function HubSchedulePage() {
             next[item.key] = {
               status: item.status,
               description: item.description,
+              typeName: item.typeName,
+              typeColor: item.typeColor,
             };
             next[item.original] = {
               status: item.status,
               description: item.description,
+              typeName: item.typeName,
+              typeColor: item.typeColor,
             };
           }
         });
@@ -178,6 +247,14 @@ export default function HubSchedulePage() {
   const workSlots = useMemo(
     () => data?.slots.filter((s) => !s.isMeal) ?? [],
     [data]
+  );
+
+  const standardWorkSlots = useMemo(
+    () =>
+      workSlots.filter(
+        (slot) => !/evening/i.test(slot.label) && !/weekend/i.test(slot.label)
+      ),
+    [workSlots]
   );
 
   const eveningSlots = useMemo(
@@ -210,15 +287,20 @@ export default function HubSchedulePage() {
         }
 
         const nameSet = new Set<string>();
-        const taskMap: Record<string, string[]> = {};
+        const taskMap: Record<string, Set<string>> = {};
 
         data.people.forEach((person, rowIdx) => {
-          const task = (data.cells[rowIdx]?.[slotIdx] ?? "").trim();
-          if (!task) return;
+          const cell = (data.cells[rowIdx]?.[slotIdx] ?? "").trim();
+          if (!cell) return;
 
-          nameSet.add(person);
-          if (!taskMap[task]) taskMap[task] = [];
-          taskMap[task].push(person);
+          const tasks = splitCellTasks(cell);
+          tasks.forEach((task) => {
+            const key = taskBaseName(task);
+            if (!key) return;
+            nameSet.add(person);
+            if (!taskMap[key]) taskMap[key] = new Set();
+            taskMap[key].add(person);
+          });
         });
 
         return {
@@ -226,7 +308,7 @@ export default function HubSchedulePage() {
           names: Array.from(nameSet),
           tasks: Object.entries(taskMap).map(([task, people]) => ({
             task,
-            people,
+            people: Array.from(people),
           })),
         };
       });
@@ -256,24 +338,33 @@ export default function HubSchedulePage() {
     );
     if (rowIndex === -1) return [];
 
-    return workSlots
-      .map((slot) => {
-        const slotIdx = data.slots.findIndex((s) => s.id === slot.id);
-        const task = (data.cells[rowIndex]?.[slotIdx] ?? "").trim();
-        if (!task) return null;
+    return (
+      workSlots
+        .map((slot) => {
+          const slotIdx = data.slots.findIndex((s) => s.id === slot.id);
+          const cell = (data.cells[rowIndex]?.[slotIdx] ?? "").trim();
+          const tasks = splitCellTasks(cell);
+          if (tasks.length === 0) return [];
 
-        const groupNames = data.people.filter((_, idx) => {
-          const candidate = (data.cells[idx]?.[slotIdx] ?? "").trim();
-          return candidate && candidate === task;
-        });
+          return tasks.map((task) => {
+            const groupNames = data.people.filter((_, idx) => {
+              const candidate = (data.cells[idx]?.[slotIdx] ?? "").trim();
+              const candidateTasks = splitCellTasks(candidate);
+              return candidateTasks.some(
+                (ct) => taskBaseName(ct) === taskBaseName(task)
+              );
+            });
 
-        return { slot, task, groupNames };
-      })
-      .filter(Boolean) as {
-      slot: Slot;
-      task: string;
-      groupNames: string[];
-    }[];
+            return { slot, task, groupNames };
+          });
+        })
+        .flat()
+        .filter(Boolean) as {
+        slot: Slot;
+        task: string;
+        groupNames: string[];
+      }[]
+    );
   }, [data, currentUserName, workSlots]);
 
   // Meal assignments
@@ -285,13 +376,15 @@ export default function HubSchedulePage() {
     slots.forEach((slot, slotIndex) => {
       if (!slot.isMeal) return;
 
-      const taskMap: Record<string, string[]> = {};
+      const taskMap: Record<string, Set<string>> = {};
       people.forEach((person, rowIndex) => {
-        const task = cells[rowIndex]?.[slotIndex] ?? "";
-        if (!task.trim()) return;
-        const key = task.trim();
-        if (!taskMap[key]) taskMap[key] = [];
-        taskMap[key].push(person);
+        const cell = cells[rowIndex]?.[slotIndex] ?? "";
+        const tasks = splitCellTasks(cell);
+        tasks.forEach((task) => {
+          const key = taskBaseName(task);
+          if (!taskMap[key]) taskMap[key] = new Set();
+          taskMap[key].add(person);
+        });
       });
 
       for (const [task, ps] of Object.entries(taskMap)) {
@@ -300,13 +393,21 @@ export default function HubSchedulePage() {
           label: slot.label,
           timeRange: slot.timeRange,
           task,
-          people: ps,
+          people: Array.from(ps),
         });
       }
     });
 
     return result;
   }, [data]);
+
+  const visibleMealSlots = useMemo(
+    () =>
+      mealSlots.filter((slot) =>
+        mealAssignments.some((assignment) => assignment.slotId === slot.id)
+      ),
+    [mealAssignments, mealSlots]
+  );
 
   const scrollSchedule = (direction: "left" | "right") => {
     const node = scheduleScrollRef.current;
@@ -419,6 +520,7 @@ export default function HubSchedulePage() {
           status: "",
           comments: [],
           photos: [],
+          taskType: { name: "", color: "default" },
         });
         return;
       }
@@ -430,13 +532,18 @@ export default function HubSchedulePage() {
         status: json.status || "",
         comments: json.comments || [],
         photos: json.photos || [],
+        taskType: json.taskType || { name: "", color: "default" },
       });
+      const metaPayload = {
+        status: json.status || "",
+        description: json.description || "",
+        typeName: json.taskType?.name,
+        typeColor: json.taskType?.color,
+      };
       setTaskMetaMap((prev) => ({
         ...prev,
-        [json.name || taskName]: {
-          status: json.status || "",
-          description: json.description || "",
-        },
+        [json.name || taskName]: metaPayload,
+        [taskName]: metaPayload,
       }));
     } catch (e) {
       console.error("Failed to load task details:", e);
@@ -446,10 +553,86 @@ export default function HubSchedulePage() {
         status: "",
         comments: [],
         photos: [],
+        taskType: { name: "", color: "default" },
       });
     } finally {
       if (!quiet) setModalLoading(false);
     }
+  }
+
+  async function updateTaskStatus(newStatus: string, taskName: string) {
+    setModalDetails((prev) =>
+      prev ? { ...prev, status: newStatus } : prev
+    );
+    setTaskMetaMap((prev) => ({
+      ...prev,
+      [taskName]: {
+        status: newStatus,
+        description: prev[taskName]?.description || "",
+        typeName: prev[taskName]?.typeName,
+        typeColor: prev[taskName]?.typeColor,
+      },
+    }));
+
+    try {
+      await fetch("/api/task", {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ name: taskName, status: newStatus }),
+      });
+    } catch (e) {
+      console.error("Failed to update task status:", e);
+    }
+  }
+
+  async function submitTaskComment(taskName: string) {
+    if (!commentDraft.trim()) return;
+    setCommentSubmitting(true);
+
+    try {
+      const comment = currentUserName
+        ? `${currentUserName} : ${commentDraft.trim()}`
+        : commentDraft.trim();
+      const res = await fetch("/api/task", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ name: taskName, comment }),
+      });
+
+      if (res.ok) {
+        setCommentDraft("");
+        await loadTaskDetails(taskName);
+      }
+    } catch (e) {
+      console.error("Failed to add comment:", e);
+    } finally {
+      setCommentSubmitting(false);
+    }
+  }
+
+  // When a task box is clicked
+  async function handleTaskClick(payload: TaskClickPayload) {
+    setModalTask(payload);
+    setModalDetails(null);
+    setCommentDraft("");
+
+    const primaryTitle = payload.task.split("\n")[0].trim();
+    if (!primaryTitle) {
+      setModalDetails({
+        name: payload.task,
+        description: "",
+        status: "",
+        comments: [],
+        photos: [],
+      });
+      return;
+    }
+
+    await loadTaskDetails(primaryTitle);
   }
 
   async function updateTaskStatus(newStatus: string, taskName: string) {
@@ -585,12 +768,14 @@ export default function HubSchedulePage() {
           )}
           {error && <p className="text-sm text-red-700">{error}</p>}
 
-          {!loading && !error && mealSlots.length === 0 && (
+          <TaskTypeLegend taskTypes={taskTypes} />
+
+          {!loading && !error && visibleMealSlots.length === 0 && (
             <p className="text-sm text-[#7a7f54]">No meal assignments found.</p>
           )}
 
           <div className="space-y-4">
-            {mealSlots.map((slot) => (
+            {visibleMealSlots.map((slot) => (
               <MealBlock
                 key={slot.id}
                 slot={slot}
@@ -598,6 +783,7 @@ export default function HubSchedulePage() {
                   (a) => a.slotId === slot.id
                 )}
                 currentUserName={currentUserName}
+                taskMetaMap={taskMetaMap}
               />
             ))}
           </div>
@@ -612,6 +798,8 @@ export default function HubSchedulePage() {
             Click any task to see its details, description, and who you are
             assigned with.
           </p>
+
+          <TaskTypeLegend taskTypes={taskTypes} />
 
           <div className="flex flex-wrap gap-2 pt-1">
             <button
@@ -654,7 +842,7 @@ export default function HubSchedulePage() {
               {!loading &&
                 !error &&
                 data &&
-                workSlots.length > 0 &&
+                standardWorkSlots.length > 0 &&
                 activeView === "schedule" && (
                   <>
                     <div className="relative">
@@ -682,7 +870,7 @@ export default function HubSchedulePage() {
                       >
                         <ScheduleGrid
                           data={data}
-                          workSlots={workSlots}
+                          workSlots={standardWorkSlots}
                           currentUserName={currentUserName}
                           currentSlotId={currentSlotId}
                           onTaskClick={handleTaskClick}
@@ -696,7 +884,6 @@ export default function HubSchedulePage() {
               {!loading &&
                 !error &&
                 data &&
-                workSlots.length > 0 &&
                 activeView === "myTasks" && (
                   <div className="px-4 py-4">
                     <MyTasksList
@@ -708,7 +895,11 @@ export default function HubSchedulePage() {
                   </div>
                 )}
 
-              {!loading && !error && data && workSlots.length === 0 && (
+              {!loading &&
+                !error &&
+                data &&
+                standardWorkSlots.length === 0 &&
+                activeView === "schedule" && (
                 <div className="px-4 py-6 text-sm text-center text-[#7a7f54]">
                   No work slots defined in this schedule.
                 </div>
@@ -726,8 +917,9 @@ export default function HubSchedulePage() {
                 Evening Schedule
               </h3>
               <p className="text-sm text-[#7a7f54]">
-                Evening shifts in one glance — everyone assigned to each block and the tasks they share.
+                Section for anyone assigned to Evening Shift, task can be completed anytime between 5:30 PM to 10 PM
               </p>
+              <TaskTypeLegend taskTypes={taskTypes} />
               <div className="rounded-lg bg-[#a0b764] px-3 py-3">
                 <div className="rounded-md bg-[#f8f4e3] overflow-x-auto">
                   <table className="min-w-full table-auto border-collapse">
@@ -767,6 +959,11 @@ export default function HubSchedulePage() {
                                   const participants =
                                     task.people.length > 0 ? task.people : cell.names;
                                   const primaryPerson = participants[0] || "Team";
+                                  const meta =
+                                    taskMetaMap[taskBaseName(task.task)];
+                                  const typeClass = typeColorClasses(
+                                    meta?.typeColor
+                                  );
 
                                   return (
                                     <button
@@ -780,7 +977,7 @@ export default function HubSchedulePage() {
                                           groupNames: participants,
                                         })
                                       }
-                                      className="rounded-md border border-[#d0c9a4] bg-white px-3 py-2 text-left shadow-sm hover:shadow transition text-xs text-[#3f3c2d]"
+                                      className={`rounded-md border px-3 py-2 text-left shadow-sm hover:shadow transition text-xs ${typeClass}`}
                                     >
                                       <div className="font-semibold text-[#42502d]">{task.task}</div>
                                       <div className="text-[11px] text-[#7a7f54]">
@@ -810,8 +1007,9 @@ export default function HubSchedulePage() {
                 Weekend Schedule
               </h3>
               <p className="text-sm text-[#7a7f54]">
-                Weekend-specific shifts grouped so you can quickly see who is involved and what they are tackling.
+                Section for anyone assgined to the Weekend Shift, task can be completed anytime wiithin the specified itme ranges below.
               </p>
+              <TaskTypeLegend taskTypes={taskTypes} />
               <div className="rounded-lg bg-[#a0b764] px-3 py-3">
                 <div className="rounded-md bg-[#f8f4e3] overflow-x-auto">
                   <table className="min-w-full table-auto border-collapse">
@@ -851,6 +1049,11 @@ export default function HubSchedulePage() {
                                   const participants =
                                     task.people.length > 0 ? task.people : cell.names;
                                   const primaryPerson = participants[0] || "Team";
+                                  const meta =
+                                    taskMetaMap[taskBaseName(task.task)];
+                                  const typeClass = typeColorClasses(
+                                    meta?.typeColor
+                                  );
 
                                   return (
                                     <button
@@ -864,7 +1067,7 @@ export default function HubSchedulePage() {
                                           groupNames: participants,
                                         })
                                       }
-                                      className="rounded-md border border-[#d0c9a4] bg-white px-3 py-2 text-left shadow-sm hover:shadow transition text-xs text-[#3f3c2d]"
+                                      className={`rounded-md border px-3 py-2 text-left shadow-sm hover:shadow transition text-xs ${typeClass}`}
                                     >
                                       <div className="font-semibold text-[#42502d]">{task.task}</div>
                                       <div className="text-[11px] text-[#7a7f54]">
@@ -921,6 +1124,30 @@ export default function HubSchedulePage() {
             </div>
 
             <div className="space-y-4">
+              {(() => {
+                const fallbackMeta =
+                  taskMetaMap[taskBaseName(modalTask.task)] || {};
+                const typeName =
+                  modalDetails?.taskType?.name || fallbackMeta.typeName;
+                const typeColor =
+                  modalDetails?.taskType?.color || fallbackMeta.typeColor;
+
+                if (!typeName) return null;
+
+                return (
+                  <div className="flex items-center gap-2">
+                    <span
+                      className={`inline-flex items-center gap-2 rounded-full border px-3 py-[4px] text-[11px] font-semibold shadow-sm ${typeColorClasses(
+                        typeColor
+                      )}`}
+                    >
+                      <span className="h-2 w-2 rounded-full bg-current opacity-70" />
+                      {typeName}
+                    </span>
+                  </div>
+                );
+              })()}
+
               <div className="rounded-lg border border-[#e2d7b5] bg-white/70 px-4 py-3 space-y-3">
                 {modalTask.task.includes("\n") && (
                   <div className="whitespace-pre-line text-[11px] leading-snug text-[#44422f] bg-[#f1edd8] border border-[#dfd6b3] rounded-md px-3 py-2">
@@ -1139,10 +1366,12 @@ function MealBlock({
   slot,
   assignments,
   currentUserName,
+  taskMetaMap,
 }: {
   slot: Slot;
   assignments: MealAssignment[];
   currentUserName: string | null;
+  taskMetaMap?: Record<string, TaskMeta>;
 }) {
   const icon = getMealIcon(slot.label);
   const normalizedUser = currentUserName?.toLowerCase() ?? "";
@@ -1166,17 +1395,16 @@ function MealBlock({
           const includesUser = a.people.some(
             (p) => p.toLowerCase() === normalizedUser
           );
+          const meta = taskMetaMap?.[taskBaseName(a.task)];
+          const typeClass = typeColorClasses(meta?.typeColor);
 
           return (
             <button
               key={a.task}
               type="button"
-              className={`w-full text-left rounded-md border px-3 py-2 flex items-center justify-between text-sm shadow-sm transition
-                ${
-                  includesUser
-                    ? "bg-[#ffeec5] border-[#f0d38d]"
-                    : "bg-[#f9f2d8] border-[#f1e6b9] hover:bg-[#f3ebcf]"
-                }`}
+              className={`w-full text-left rounded-md border px-3 py-2 flex items-center justify-between text-sm shadow-sm transition ${typeClass} ${
+                includesUser ? "ring-2 ring-[#f0d38d]" : "hover:shadow"
+              }`}
             >
               <span className="text-[#5b5a3a]">{a.task}</span>
               <span className="text-[#7c7a4a] text-xs font-medium">
@@ -1238,6 +1466,26 @@ function StatusBadge({ status }: { status?: string }) {
   );
 }
 
+function TaskTypeLegend({ taskTypes }: { taskTypes: TaskTypeOption[] }) {
+  if (!taskTypes.length) return null;
+
+  return (
+    <div className="flex flex-wrap gap-2 pt-1">
+      {taskTypes.map((type) => (
+        <span
+          key={type.name}
+          className={`inline-flex items-center gap-2 rounded-full border px-3 py-[4px] text-[11px] font-semibold shadow-sm ${typeColorClasses(
+            type.color
+          )}`}
+        >
+          <span className="h-2 w-2 rounded-full bg-current opacity-70" />
+          {type.name}
+        </span>
+      ))}
+    </div>
+  );
+}
+
 function MyTasksList({
   tasks,
   onTaskClick,
@@ -1260,9 +1508,11 @@ function MyTasksList({
   return (
     <div className="grid gap-3 md:grid-cols-2">
       {tasks.map(({ slot, task, groupNames }) => {
-        const primary = task.split("\n")[0].trim();
-        const status = statusMap[primary]?.status || "";
-        const description = statusMap[primary]?.description || "";
+        const primary = taskBaseName(task);
+        const meta = statusMap[primary];
+        const status = meta?.status || "";
+        const description = meta?.description || "";
+        const typeClass = typeColorClasses(meta?.typeColor);
 
         return (
           <button
@@ -1276,7 +1526,7 @@ function MyTasksList({
                 groupNames,
               })
             }
-            className="w-full rounded-lg border border-[#d1d4aa] bg-white px-4 py-3 text-left shadow-sm hover:border-[#b8c98a] hover:bg-[#f9f7e8]"
+            className={`w-full rounded-lg border px-4 py-3 text-left shadow-sm hover:border-[#b8c98a] hover:shadow ${typeClass}`}
           >
             <div className="flex items-start justify-between gap-2">
               <div>
@@ -1338,10 +1588,9 @@ function ScheduleGrid({
 }) {
   const { people, slots, cells } = data;
 
-  const workSlotIndices = slots
-    .map((s, idx) => ({ s, idx }))
-    .filter(({ s }) => !s.isMeal)
-    .map(({ idx }) => idx);
+  const workSlotIndices = workSlots
+    .map((slot) => slots.findIndex((s) => s.id === slot.id))
+    .filter((idx) => idx !== -1);
 
   const numRows = people.length;
   const numCols = workSlotIndices.length;
@@ -1596,8 +1845,8 @@ function ScheduleGrid({
                 }
 
                 const sharedCount = groupNames.length;
-                const primaryTitle = task.split("\n")[0].trim();
-                const status = statusMap[primaryTitle]?.status || "";
+                const taskEntries = splitCellTasks(task);
+                const displayTasks = taskEntries.length ? taskEntries : [task];
 
                 return (
                   <td
@@ -1609,41 +1858,56 @@ function ScheduleGrid({
                       isCurrentCol ? "bg-[#f0f4de]" : ""
                     }`}
                   >
-                    <button
-                      type="button"
-                      onClick={() =>
-                        onTaskClick?.({
-                          person,
-                          slot,
-                          task,
-                          groupNames,
-                        })
-                      }
-                      style={{ minHeight: `${spanHeight}px` }}
-                      className="flex h-full min-h-full w-full flex-col justify-between gap-2 text-left rounded-md bg-[#e3e6bf] border border-[#cfd2a1] p-2 text-[11px] leading-snug text-[#3f4630] shadow-sm hover:bg-[#dde1b7] focus:outline-none focus:ring-2 focus:ring-[#8fae4c]"
-                    >
-                      <div className="flex justify-between items-start gap-2">
-                        <span className="font-semibold">
-                          {primaryTitle}
-                        </span>
-                        {sharedCount > 1 && (
-                          <span className="text-[9px] text-[#6e7544] bg-white/70 rounded-full px-2 py-[1px]">
-                            {sharedCount} people
-                          </span>
-                        )}
-                      </div>
-                      <div className="mt-1">
-                        <StatusBadge status={status} />
-                      </div>
-                      {task.includes("\n") && (
-                        <div className="mt-1 whitespace-pre-line opacity-90">
-                          {task
-                            .split("\n")
-                            .slice(1)
-                            .join("\n")}
-                        </div>
-                      )}
-                    </button>
+                    <div className="flex h-full w-full flex-col gap-2">
+                      {displayTasks.map((taskText, idx) => {
+                        const primaryTitle = taskBaseName(taskText);
+                        const meta = statusMap[primaryTitle];
+                        const note = taskText
+                          .split("\n")
+                          .slice(1)
+                          .join("\n");
+                        const perHeight = Math.max(
+                          spanHeight / displayTasks.length,
+                          baseRowHeight * 0.7
+                        );
+
+                        return (
+                          <button
+                            key={`${visualRow}-${slotIndex}-${primaryTitle}-${idx}`}
+                            type="button"
+                            onClick={() =>
+                              onTaskClick?.({
+                                person,
+                                slot,
+                                task: taskText,
+                                groupNames,
+                              })
+                            }
+                            style={{ minHeight: `${perHeight}px` }}
+                            className={`flex h-full min-h-full w-full flex-col justify-between gap-2 text-left rounded-md border p-2 text-[11px] leading-snug shadow-sm focus:outline-none focus:ring-2 focus:ring-[#8fae4c] ${typeColorClasses(
+                              meta?.typeColor
+                            )}`}
+                          >
+                            <div className="flex justify-between items-start gap-2">
+                              <span className="font-semibold">{primaryTitle}</span>
+                              {sharedCount > 1 && (
+                                <span className="text-[9px] text-[#4f4f31] bg-white/70 rounded-full px-2 py-[1px]">
+                                  {sharedCount} people
+                                </span>
+                              )}
+                            </div>
+                            <div className="mt-1">
+                              <StatusBadge status={meta?.status} />
+                            </div>
+                            {note && (
+                              <div className="mt-1 whitespace-pre-line opacity-90">
+                                {note}
+                              </div>
+                            )}
+                          </button>
+                        );
+                      })}
+                    </div>
                   </td>
                 );
               })}
