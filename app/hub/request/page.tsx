@@ -20,6 +20,7 @@ type RequestSummary = {
   user: string;
   status: string;
   createdTime: string;
+  anonymous?: boolean;
 };
 
 type RequestComment = {
@@ -44,6 +45,7 @@ export default function HubRequestPage() {
   const [createDesc, setCreateDesc] = useState("");
   const [createError, setCreateError] = useState("");
   const [createBusy, setCreateBusy] = useState(false);
+  const [createAnonymous, setCreateAnonymous] = useState(false);
 
   const [activeRequest, setActiveRequest] = useState<RequestDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
@@ -54,6 +56,7 @@ export default function HubRequestPage() {
   const [editDesc, setEditDesc] = useState("");
   const [editBusy, setEditBusy] = useState(false);
   const [editError, setEditError] = useState("");
+  const [editAnonymous, setEditAnonymous] = useState(false);
 
   useEffect(() => {
     const session = loadSession();
@@ -92,6 +95,7 @@ export default function HubRequestPage() {
         setActiveRequest(detail);
         setEditName(detail.name);
         setEditDesc(detail.description);
+        setEditAnonymous(!!detail.anonymous);
       }
     } catch (err) {
       console.error("Failed to load request detail", err);
@@ -154,6 +158,7 @@ export default function HubRequestPage() {
           name: createName.trim(),
           description: createDesc.trim(),
           user: sessionName,
+          anonymous: createAnonymous,
         }),
       });
       const data = await res.json();
@@ -165,6 +170,7 @@ export default function HubRequestPage() {
       setRequests((prev) => [data.request, ...prev]);
       setCreateName("");
       setCreateDesc("");
+      setCreateAnonymous(false);
       setCreateOpen(false);
     } catch (err) {
       console.error("Failed to submit request", err);
@@ -235,6 +241,7 @@ export default function HubRequestPage() {
           id: activeRequest.id,
           name: editName.trim(),
           description: editDesc.trim(),
+          anonymous: editAnonymous,
         }),
       });
       const data = await res.json();
@@ -361,7 +368,7 @@ export default function HubRequestPage() {
                   </div>
                   <p className="text-sm text-[#5b6240] line-clamp-2">{req.description}</p>
                   <div className="text-[11px] uppercase tracking-[0.14em] text-[#777f57] flex items-center gap-2">
-                    <span className="font-semibold">{req.user}</span>
+                    <span className="font-semibold">{req.anonymous ? "Anonymous" : req.user}</span>
                     <span className="h-1 w-1 rounded-full bg-[#b6bb9c]" />
                     <span>{new Date(req.createdTime).toLocaleDateString()}</span>
                   </div>
@@ -425,6 +432,16 @@ export default function HubRequestPage() {
                 />
               </div>
 
+              <label className="mt-1 inline-flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.14em] text-[#556036]">
+                <input
+                  type="checkbox"
+                  checked={createAnonymous}
+                  onChange={(e) => setCreateAnonymous(e.target.checked)}
+                  className="h-4 w-4 rounded border-[#b5bf90] text-[#5d7f3b] focus:ring-[#7a8c43]"
+                />
+                Submit anonymously
+              </label>
+
               {createError && <p className="text-sm text-rose-600">{createError}</p>}
 
               <div className="flex items-center justify-end gap-3">
@@ -454,7 +471,7 @@ export default function HubRequestPage() {
             <div className="flex items-start justify-between gap-3">
               <div className="space-y-1">
                 <p className="text-[11px] uppercase tracking-[0.14em] text-[#777f57]">
-                  Submitted by <span className="font-semibold">{activeRequest.user}</span> · {new Date(activeRequest.createdTime).toLocaleString()}
+                  Submitted by <span className="font-semibold">{activeRequest.anonymous ? "Anonymous" : activeRequest.user}</span> · {new Date(activeRequest.createdTime).toLocaleString()}
                 </p>
                 <div className="flex flex-wrap items-center gap-3">
                   <h2 className="text-xl font-semibold text-[#3b4224]">{activeRequest.name}</h2>
@@ -518,6 +535,16 @@ export default function HubRequestPage() {
                       className="w-full rounded-md border border-[#d5d7bc] bg-white px-3 py-2 text-sm text-[#3b4224] focus:outline-none focus:ring-2 focus:ring-[#a0b764]"
                       rows={4}
                     />
+
+                    <label className="inline-flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.14em] text-[#556036]">
+                      <input
+                        type="checkbox"
+                        checked={editAnonymous}
+                        onChange={(e) => setEditAnonymous(e.target.checked)}
+                        className="h-4 w-4 rounded border-[#b5bf90] text-[#5d7f3b] focus:ring-[#7a8c43]"
+                      />
+                      Submit anonymously
+                    </label>
 
                     {editError && <p className="text-sm text-rose-600">{editError}</p>}
 
