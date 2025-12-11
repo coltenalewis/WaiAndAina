@@ -14,6 +14,7 @@ const NAME_KEY = "Name";
 const DESCRIPTION_KEY = "Description";
 const USER_KEY = "User";
 const STATUS_KEY = "Status";
+const ANONYMOUS_KEY = "Anonymous";
 
 const MAX_NAME_WORDS = 8;
 const MAX_NAME_CHARS = 80;
@@ -21,6 +22,13 @@ const MAX_DESCRIPTION_CHARS = 500;
 
 function getPlainText(prop: any): string {
   if (!prop) return "";
+
+  if (Array.isArray(prop)) {
+    return prop
+      .map((t: any) => t.plain_text || "")
+      .join("")
+      .trim();
+  }
 
   switch (prop.type) {
     case "title":
@@ -48,6 +56,7 @@ function mapPageToRequest(page: any) {
     description: getPlainText(props[DESCRIPTION_KEY]) || "",
     user: getPlainText(props[USER_KEY]) || "Unknown",
     status: getPlainText(props[STATUS_KEY]) || "Pending",
+    anonymous: props[ANONYMOUS_KEY]?.checkbox || false,
     createdTime: page.created_time,
   };
 }
@@ -137,7 +146,7 @@ export async function POST(req: Request) {
   }
 
   const body = await req.json().catch(() => null);
-  const { name, description, user, action, id, comment } = body || {};
+  const { name, description, user, action, id, comment, anonymous } = body || {};
 
   if (action === "comment") {
     if (!id || !comment || !user) {
@@ -211,6 +220,9 @@ export async function POST(req: Request) {
       [STATUS_KEY]: {
         select: { name: "Pending" },
       },
+      [ANONYMOUS_KEY]: {
+        checkbox: !!anonymous,
+      },
     });
 
     return NextResponse.json({ success: true, request: mapPageToRequest(page) });
@@ -232,7 +244,7 @@ export async function PATCH(req: Request) {
   }
 
   const body = await req.json().catch(() => null);
-  const { id, name, description, action } = body || {};
+  const { id, name, description, action, anonymous } = body || {};
 
   if (!id) {
     return NextResponse.json({ error: "Missing request id" }, { status: 400 });
@@ -302,6 +314,9 @@ export async function PATCH(req: Request) {
             text: { content: description },
           },
         ],
+      },
+      [ANONYMOUS_KEY]: {
+        checkbox: !!anonymous,
       },
     });
 
