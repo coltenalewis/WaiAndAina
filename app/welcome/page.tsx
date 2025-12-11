@@ -24,14 +24,17 @@ export default function WelcomePage() {
   }, [router]);
 
   return (
-    <main className="min-h-screen flex items-center justify-center bg-[#f8f4e3] text-[#3b4224]">
-      <div className="text-center animate-[fadeIn_0.8s_ease-out]">
-        <div className="mx-auto mb-4 h-16 w-16 rounded-full bg-[#f1e4b5] flex items-center justify-center shadow-md">
-          <span className="text-2xl">🐐</span>
+    <main className="min-h-screen flex items-center justify-center bg-[#f8f4e3] text-[#3b4224] px-4">
+      <div className="text-center animate-[fadeIn_0.8s_ease-out] max-w-md w-full">
+        <div className="mx-auto mb-4 h-14 w-14 sm:h-16 sm:w-16 rounded-full bg-[#f1e4b5] flex items-center justify-center shadow-md">
+          <span className="text-xl sm:text-2xl">🐐</span>
         </div>
-        <h1 className="text-3xl font-semibold tracking-[0.25em] text-[#5d7f3b] uppercase">
+        <h1 className="text-2xl sm:text-3xl font-semibold tracking-[0.16em] sm:tracking-[0.25em] text-[#5d7f3b] uppercase leading-snug">
           Welcome{ name ? `, ${name}` : "" }
         </h1>
+        <p className="mt-3 text-[11px] sm:text-xs text-[#7a7f54] tracking-wide">
+          Loading your Wai &amp; Aina hub&hellip;
+        </p>
       </div>
 
       {/* Simple keyframes for fade in */}
