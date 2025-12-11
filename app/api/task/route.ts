@@ -14,11 +14,11 @@ const TASK_DESC_PROPERTY_KEY = "Description"; // rich_text
 const TASK_STATUS_PROPERTY_KEY = "Status";    // select
 const TASK_PHOTOS_PROPERTY_KEY = "Photos";    // files
 const TASK_TYPE_PROPERTY_KEY = "Task Type";   // select
+const TASK_LINKS_PROPERTY_KEY = "Links";      // rich_text or url
 
 function getPlainText(prop: any): string {
   if (!prop) return "";
 
-  // NEW: handle raw rich_text arrays (like comments)
   if (Array.isArray(prop)) {
     return prop
       .map((t: any) => t.plain_text || "")
@@ -26,7 +26,6 @@ function getPlainText(prop: any): string {
       .trim();
   }
 
-  // Existing property handling
   switch (prop.type) {
     case "title":
       return (prop.title || [])
@@ -45,6 +44,8 @@ function getPlainText(prop: any): string {
         .map((s: any) => s.name || "")
         .join(", ")
         .trim();
+    case "url":
+      return prop.url || "";
     case "files":
       return (prop.files || [])
         .map((f: any) => f.name || "")
@@ -60,6 +61,26 @@ function getPlainText(prop: any): string {
       }
       return "";
   }
+}
+
+function parseLinks(raw: string): { label: string; url: string }[] {
+  if (!raw.trim()) return [];
+
+  return raw
+    .split(",")
+    .map((entry) => entry.trim())
+    .filter(Boolean)
+    .map((entry) => {
+      const bracketMatch = entry.match(/^\[(.+?)\](.+)$/);
+      if (bracketMatch) {
+        return {
+          label: bracketMatch[1].trim(),
+          url: bracketMatch[2].trim(),
+        };
+      }
+
+      return { label: entry, url: entry };
+    });
 }
 
 async function findTaskPageByName(name: string) {
@@ -114,6 +135,7 @@ export async function GET(req: Request) {
     const pageName = getPlainText(props[TASK_NAME_PROPERTY_KEY]) || name;
     const description = getPlainText(props[TASK_DESC_PROPERTY_KEY]);
     const status = getPlainText(props[TASK_STATUS_PROPERTY_KEY]);
+    const links = parseLinks(getPlainText(props[TASK_LINKS_PROPERTY_KEY]));
     const typeProp = props[TASK_TYPE_PROPERTY_KEY];
     const taskType =
       typeProp?.type === "select"
@@ -153,6 +175,7 @@ export async function GET(req: Request) {
       name: pageName,
       description: description || "",
       status: status || "",
+      links,
       taskType,
       photos,
       comments,
