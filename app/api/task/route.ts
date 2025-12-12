@@ -8,8 +8,10 @@ import {
 
 const TASKS_DB_ID = process.env.NOTION_TASKS_DATABASE_ID!;
 
-// Notion property names in your Tasks DB
-const TASK_NAME_PROPERTY_KEY = "Name";        // title
+// ─────────────────────────────────────────────
+// Notion property keys
+// ─────────────────────────────────────────────
+const TASK_NAME_PROPERTY_KEY = "Name"; // title
 const TASK_DESC_PROPERTY_KEY = "Description"; // rich_text
 const TASK_STATUS_PROPERTY_KEY = "Status";    // select
 const TASK_PHOTOS_PROPERTY_KEY = "Photos";    // files
@@ -17,6 +19,9 @@ const TASK_TYPE_PROPERTY_KEY = "Task Type";   // select
 const TASK_LINKS_PROPERTY_KEY = "Links";      // rich_text or url
 const TASK_ESTIMATE_PROPERTY_KEY = "Estimated Time"; // rich_text or text
 
+// ─────────────────────────────────────────────
+// Helpers
+// ─────────────────────────────────────────────
 function getPlainText(prop: any): string {
   if (!prop) return "";
 
@@ -29,15 +34,9 @@ function getPlainText(prop: any): string {
 
   switch (prop.type) {
     case "title":
-      return (prop.title || [])
-        .map((t: any) => t.plain_text || "")
-        .join("")
-        .trim();
+      return (prop.title || []).map((t: any) => t.plain_text || "").join("").trim();
     case "rich_text":
-      return (prop.rich_text || [])
-        .map((t: any) => t.plain_text || "")
-        .join("")
-        .trim();
+      return (prop.rich_text || []).map((t: any) => t.plain_text || "").join("").trim();
     case "select":
       return prop.select?.name || "";
     case "multi_select":
@@ -53,6 +52,9 @@ function getPlainText(prop: any): string {
         .join(", ")
         .trim();
     default:
+      if (Array.isArray(prop.rich_text)) {
+        return prop.rich_text.map((t: any) => t.plain_text || "").join("").trim();
+      }
       return "";
   }
 }
@@ -109,11 +111,9 @@ export async function GET(req: Request) {
 
   const { searchParams } = new URL(req.url);
   const name = searchParams.get("name");
+
   if (!name) {
-    return NextResponse.json(
-      { error: "Missing task name" },
-      { status: 400 }
-    );
+    return NextResponse.json({ error: "Missing task name" }, { status: 400 });
   }
 
   try {
@@ -190,11 +190,87 @@ export async function GET(req: Request) {
       comments,
     });
   } catch (err) {
-    console.error("Failed to fetch task details from Notion:", err);
+    console.error("GET /task failed:", err);
+    return NextResponse.json({ error: "Failed to fetch task" }, { status: 500 });
+  }
+}
+
+// ─────────────────────────────────────────────
+// PATCH — update task status
+// ─────────────────────────────────────────────
+export async function PATCH(req: Request) {
+  if (!TASKS_DB_ID) {
     return NextResponse.json(
-      { error: "Failed to fetch task details" },
+      { error: "NOTION_TASKS_DATABASE_ID is not set" },
       { status: 500 }
     );
+  }
+
+  const body = await req.json().catch(() => null);
+  const { name, status } = body || {};
+
+  if (!name || !status) {
+    return NextResponse.json(
+      { error: "Missing task name or status" },
+      { status: 400 }
+    );
+  }
+
+  try {
+    const page = await findTaskPageByName(name);
+    if (!page) {
+      return NextResponse.json({ error: "Task not found" }, { status: 404 });
+    }
+
+    await updatePage(page.id, {
+      [TASK_STATUS_PROPERTY_KEY]: { select: { name: status } },
+    });
+
+    return NextResponse.json({ success: true, status });
+  } catch (err) {
+    console.error("PATCH /task failed:", err);
+    return NextResponse.json({ error: "Failed to update status" }, { status: 500 });
+  }
+}
+
+// ─────────────────────────────────────────────
+// POST — add comment
+// ─────────────────────────────────────────────
+export async function POST(req: Request) {
+  if (!TASKS_DB_ID) {
+    return NextResponse.json(
+      { error: "NOTION_TASKS_DATABASE_ID is not set" },
+      { status: 500 }
+    );
+  }
+
+  const body = await req.json().catch(() => null);
+  const { name, comment } = body || {};
+
+  if (!name || !comment) {
+    return NextResponse.json(
+      { error: "Missing task name or comment" },
+      { status: 400 }
+    );
+  }
+
+  try {
+    const page = await findTaskPageByName(name);
+    if (!page) {
+      return NextResponse.json({ error: "Task not found" }, { status: 404 });
+    }
+
+    await createComment(page.id, [
+      {
+        type: "text",
+        text: { content: comment },
+      },
+    ]);
+
+    return NextResponse.json({ success: true });
+  } catch (err) {
+    console.error("POST /task failed:", err);
+    return NextResponse.json({ error: "Failed to add comment" }, { status: 500 });
   }
 }
 
