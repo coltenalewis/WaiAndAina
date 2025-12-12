@@ -1,6 +1,10 @@
 // src/app/api/schedule/route.ts
 import { NextResponse } from "next/server";
-import { queryDatabase } from "@/lib/notion";
+import {
+  queryAllDatabasePages,
+  queryDatabase,
+  retrieveDatabase,
+} from "@/lib/notion";
 
 const SCHEDULE_DB_ID = process.env.NOTION_SCHEDULE_DATABASE_ID!;
 
@@ -8,10 +12,10 @@ const SCHEDULE_DB_ID = process.env.NOTION_SCHEDULE_DATABASE_ID!;
 const PERSON_PROPERTY_KEY = "Person";
 
 type Slot = {
-  id: string;        // original Notion property key
-  label: string;     // e.g. "Breakfast"
+  id: string; // original Notion property key
+  label: string; // e.g. "Breakfast"
   timeRange: string; // e.g. "9:00-10:30"
-  isMeal: boolean;   // Breakfast / Lunch
+  isMeal: boolean; // Breakfast / Lunch
 };
 
 type ScheduleResponse = {
@@ -48,12 +52,16 @@ function getPlainText(prop: any): string {
 }
 
 function parseSlotMeta(key: string) {
+  const orderMatch = key.match(/^(\d+)\s*\|\s*(.+)$/);
+  const order = orderMatch ? Number(orderMatch[1]) : Number.POSITIVE_INFINITY;
+  const withoutOrder = (orderMatch ? orderMatch[2] : key).trim();
+
   // Try to split "Breakfast (9:00-10:30)" into label + time
-  const match = key.match(/^(.+?)\s*\((.+)\)\s*$/);
-  const label = (match ? match[1] : key).trim();
+  const match = withoutOrder.match(/^(.+?)\s*\((.+)\)\s*$/);
+  const label = (match ? match[1] : withoutOrder).trim();
   const timeRange = (match ? match[2] : "").trim();
-  const isMeal = /breakfast|lunch/i.test(label);
-  return { label, timeRange, isMeal };
+  const isMeal = /breakfast|lunch|dinner/i.test(label);
+  return { label, timeRange, isMeal, order };
 }
 
 export async function GET() {
@@ -65,7 +73,7 @@ export async function GET() {
   }
 
   try {
-    const data = await queryDatabase(SCHEDULE_DB_ID);
+    const data = await queryAllDatabasePages(SCHEDULE_DB_ID);
     const pages = data.results || [];
 
     if (pages.length === 0) {
@@ -73,25 +81,43 @@ export async function GET() {
       return NextResponse.json(empty);
     }
 
-    // Use the first row's properties to determine ALL columns
-    const firstProps = pages[0].properties || {};
+    let slotKeys: string[] = [];
 
-    // All keys except the Person column are treated as time slots.
-    // Their order here will match the order Notion returns them in.
-    const slotKeys: string[] = Object.keys(firstProps).filter(
-      (key) => key !== PERSON_PROPERTY_KEY
-    );
+    try {
+      const dbMeta = await retrieveDatabase(SCHEDULE_DB_ID);
+      const metaProps = dbMeta?.properties || {};
+      slotKeys = Object.keys(metaProps).filter(
+        (key) => key !== PERSON_PROPERTY_KEY
+      );
+    } catch (metaErr) {
+      console.error("Failed to retrieve database metadata, falling back to first row:", metaErr);
+      const firstProps = pages[0].properties || {};
+      slotKeys = Object.keys(firstProps).filter(
+        (key) => key !== PERSON_PROPERTY_KEY
+      );
+    }
 
     // Build slot metadata
-    const slots: Slot[] = slotKeys.map((key) => {
+    const slotEntries = slotKeys.map((key) => {
       const meta = parseSlotMeta(key);
       return {
-        id: key,
-        label: meta.label,
-        timeRange: meta.timeRange,
-        isMeal: meta.isMeal,
+        key,
+        ...meta,
       };
     });
+
+    slotEntries.sort((a, b) => {
+      if (a.order !== b.order) return a.order - b.order;
+      return a.label.localeCompare(b.label);
+    });
+
+    const orderedKeys = slotEntries.map((s) => s.key);
+    const slots: Slot[] = slotEntries.map((entry) => ({
+      id: entry.key,
+      label: entry.label,
+      timeRange: entry.timeRange,
+      isMeal: entry.isMeal,
+    }));
 
     const people: string[] = [];
     const cells: string[][] = [];
@@ -105,7 +131,7 @@ export async function GET() {
 
       const rowTasks: string[] = [];
 
-      for (const key of slotKeys) {
+      for (const key of orderedKeys) {
         const prop = page.properties?.[key];
         const task = getPlainText(prop);
         rowTasks.push(task || "");
