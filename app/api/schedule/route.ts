@@ -1,6 +1,10 @@
 // src/app/api/schedule/route.ts
 import { NextResponse } from "next/server";
-import { queryDatabase, retrieveDatabase } from "@/lib/notion";
+import {
+  queryAllDatabasePages,
+  queryDatabase,
+  retrieveDatabase,
+} from "@/lib/notion";
 
 const SCHEDULE_DB_ID = process.env.NOTION_SCHEDULE_DATABASE_ID!;
 
@@ -69,7 +73,7 @@ export async function GET() {
   }
 
   try {
-    const data = await queryDatabase(SCHEDULE_DB_ID);
+    const data = await queryAllDatabasePages(SCHEDULE_DB_ID);
     const pages = data.results || [];
 
     if (pages.length === 0) {

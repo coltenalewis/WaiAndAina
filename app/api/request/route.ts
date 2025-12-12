@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import {
   createComment,
   createPageInDatabase,
+  queryAllDatabasePages,
   queryDatabase,
   retrieveComments,
   retrievePage,
@@ -120,7 +121,7 @@ export async function GET(req: Request) {
       return NextResponse.json({ ...base, comments });
     }
 
-    const data = await queryDatabase(REQUESTS_DB_ID, {
+    const data = await queryAllDatabasePages(REQUESTS_DB_ID, {
       sorts: [
         {
           timestamp: "created_time",

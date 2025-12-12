@@ -45,6 +45,34 @@ export async function queryDatabase(databaseId: string, body: any = {}) {
   return res.json();
 }
 
+export async function queryAllDatabasePages(
+  databaseId: string,
+  body: any = {}
+) {
+  let startCursor: string | undefined = undefined;
+  let hasMore = true;
+  const allResults: any[] = [];
+  let lastResponse: any = null;
+
+  while (hasMore) {
+    const response = await queryDatabase(databaseId, {
+      ...body,
+      start_cursor: startCursor,
+    });
+
+    lastResponse = response;
+    allResults.push(...(response.results || []));
+
+    hasMore = Boolean(response.has_more && response.next_cursor);
+    startCursor = response.next_cursor as string | undefined;
+  }
+
+  return {
+    ...(lastResponse || {}),
+    results: allResults,
+  };
+}
+
 export async function createPageInDatabase(
   databaseId: string,
   properties: any

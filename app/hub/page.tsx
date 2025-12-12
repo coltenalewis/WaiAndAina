@@ -44,8 +44,10 @@ type TaskDetails = {
   description: string;
   status: string;
   comments: TaskComment[];
-  photos: { name: string; url: string }[];
+  media: { name: string; url: string; kind: "image" | "video" | "audio" | "file" }[];
+  links?: { label: string; url: string }[];
   taskType?: { name: string; color: string };
+  estimatedTime?: string;
 };
 
 type TaskTypeOption = { name: string; color: string };
@@ -326,6 +328,33 @@ export default function HubSchedulePage() {
     [combineSlotAssignments, weekendSlots]
   );
 
+  const userHasTasksForSlots = useCallback(
+    (slots: Slot[]) => {
+      if (!data || !currentUserName) return false;
+
+      const me = currentUserName.trim().toLowerCase();
+      const rowIdx = data.people.findIndex(
+        (person) => person.trim().toLowerCase() === me
+      );
+
+      if (rowIdx === -1) return false;
+
+      return slots.some((slot) => {
+        const slotIdx = data.slots.findIndex((s) => s.id === slot.id);
+        if (slotIdx === -1) return false;
+
+        const cell = (data.cells[rowIdx]?.[slotIdx] ?? "").trim();
+        return splitCellTasks(cell).length > 0;
+      });
+    },
+    [data, currentUserName]
+  );
+
+  const showEveningSection =
+    eveningCombined.length > 0 && userHasTasksForSlots(eveningSlots);
+  const showWeekendSection =
+    weekendCombined.length > 0 && userHasTasksForSlots(weekendSlots);
+
   const myTasks = useMemo(() => {
     if (!data || !currentUserName) return [] as {
       slot: Slot;
@@ -564,8 +593,10 @@ export default function HubSchedulePage() {
           description: "",
           status: "",
           comments: [],
-          photos: [],
+          media: [],
+          links: [],
           taskType: { name: "", color: "default" },
+          estimatedTime: "",
         });
         return;
       }
@@ -576,8 +607,10 @@ export default function HubSchedulePage() {
         description: json.description || "",
         status: json.status || "",
         comments: json.comments || [],
-        photos: json.photos || [],
+        media: json.media || json.photos || [],
+        links: json.links || [],
         taskType: json.taskType || { name: "", color: "default" },
+        estimatedTime: json.estimatedTime || "",
       });
       const metaPayload = {
         status: json.status || "",
@@ -597,8 +630,10 @@ export default function HubSchedulePage() {
         description: "",
         status: "",
         comments: [],
-        photos: [],
+        media: [],
+        links: [],
         taskType: { name: "", color: "default" },
+        estimatedTime: "",
       });
     } finally {
       if (!quiet) setModalLoading(false);
@@ -660,28 +695,28 @@ export default function HubSchedulePage() {
   }
 
   // When a task box is clicked
-async function handleTaskClick(payload: TaskClickPayload) {
-  setModalTask(payload);
-  setModalDetails(null);
-  setCommentDraft("");
+  async function handleTaskClick(taskPayload: TaskClickPayload) {
+    setModalTask(taskPayload);
+    setModalDetails(null);
+    setCommentDraft("");
 
-  const primaryTitle = (payload.task || "").split("\n")[0].trim();
+    const baseTitle = taskBaseName(taskPayload.task || "");
+    if (!baseTitle) {
+      setModalDetails({
+        name: taskPayload.task,
+        description: "",
+        status: "",
+        comments: [],
+        media: [],
+        links: [],
+        taskType: { name: "", color: "default" },
+        estimatedTime: "",
+      });
+      return;
+    }
 
-  if (!primaryTitle) {
-    setModalDetails({
-      name: payload.task || "",
-      description: "",
-      status: "",
-      comments: [],
-      photos: [],
-      taskType: { name: "", color: "default" },
-    });
-    return;
+    await loadTaskDetails(baseTitle);
   }
-
-  await loadTaskDetails(primaryTitle);
-}
-
 
   function closeModal() {
     setModalTask(null);
@@ -898,7 +933,7 @@ async function handleTaskClick(payload: TaskClickPayload) {
         {!loading &&
           !error &&
           data &&
-          eveningCombined.length > 0 && (
+          showEveningSection && (
             <section className="space-y-3">
               <h3 className="text-xl font-semibold tracking-[0.16em] uppercase text-[#5d7f3b]">
                 Evening Schedule
@@ -987,7 +1022,7 @@ async function handleTaskClick(payload: TaskClickPayload) {
         {!loading &&
           !error &&
           data &&
-          weekendCombined.length > 0 && (
+          showWeekendSection && (
             <section className="space-y-3">
               <h3 className="text-xl font-semibold tracking-[0.16em] uppercase text-[#5d7f3b]">
                 Weekend Schedule
@@ -1163,6 +1198,38 @@ async function handleTaskClick(payload: TaskClickPayload) {
                   )}
                 </div>
 
+                {!modalLoading && modalDetails?.estimatedTime ? (
+                  <div className="space-y-1">
+                    <p className="text-[10px] uppercase tracking-[0.12em] text-[#8a8256]">
+                      Estimated Time for Completion
+                    </p>
+                    <p className="text-[12px] font-semibold text-[#3e4c24]">
+                      {modalDetails.estimatedTime}
+                    </p>
+                  </div>
+                ) : null}
+
+                  {!modalLoading && modalDetails?.links?.length ? (
+                    <div className="space-y-2">
+                      <p className="text-[10px] uppercase tracking-[0.12em] text-[#8a8256]">
+                        Relevant Links
+                      </p>
+                      <div className="flex flex-wrap gap-2">
+                        {modalDetails.links.map((link) => (
+                        <a
+                          key={`${link.url}-${link.label}`}
+                          href={link.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1 rounded-full border border-[#cdd7ab] bg-white/80 px-3 py-1 text-[12px] font-semibold text-[#2f5ba0] underline underline-offset-2 hover:bg-[#f1edd8]"
+                        >
+                          {link.label || link.url}
+                        </a>
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
+
                 <div className="text-[11px] text-[#666242]">
                   {(() => {
                     const me = modalTask.person.toLowerCase();
@@ -1254,41 +1321,75 @@ async function handleTaskClick(payload: TaskClickPayload) {
                 <div className="flex items-center justify-between">
                   <div>
                     <p className="text-[10px] uppercase tracking-[0.12em] text-[#8a8256]">
-                      Task Photos
+                      Task Media
                     </p>
                     <p className="text-[11px] text-[#6a6748]">
-                      Existing photos for this task.
+                      Existing media for this task.
                     </p>
                   </div>
                 </div>
                 <div className="space-y-2">
-                  {modalDetails?.photos?.length ? (
-                    <div className="flex flex-wrap gap-2">
-                      {modalDetails.photos.map((photo) => (
-                        <a
-                          key={photo.url}
-                          href={photo.url}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="group block w-24 overflow-hidden rounded-md border border-[#e2d7b5] bg-[#f7f3de]"
-                        >
-                          <div className="aspect-square w-full overflow-hidden">
-                            {/* eslint-disable-next-line @next/next/no-img-element */}
-                            <img
-                              src={photo.url}
-                              alt={photo.name}
-                              className="h-full w-full object-cover transition group-hover:scale-105"
-                            />
-                          </div>
-                          <p className="truncate px-2 py-1 text-[10px] text-[#5b593c]">
-                            {photo.name}
-                          </p>
-                        </a>
-                      ))}
+                  {modalDetails?.media?.length ? (
+                    <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+                      {modalDetails.media.map((item) => {
+                        if (item.kind === "video") {
+                          return (
+                            <div
+                              key={item.url}
+                              className="overflow-hidden rounded-md border border-[#e2d7b5] bg-[#f7f3de]"
+                            >
+                              <video
+                                src={item.url}
+                                controls
+                                className="h-36 w-full object-cover"
+                              />
+                              <p className="truncate px-2 py-1 text-[10px] text-[#5b593c]">
+                                {item.name}
+                              </p>
+                            </div>
+                          );
+                        }
+
+                        if (item.kind === "audio") {
+                          return (
+                            <div
+                              key={item.url}
+                              className="rounded-md border border-[#e2d7b5] bg-[#f7f3de] p-2"
+                            >
+                              <p className="truncate text-[11px] font-semibold text-[#5b593c]">
+                                {item.name}
+                              </p>
+                              <audio src={item.url} controls className="mt-2 w-full" />
+                            </div>
+                          );
+                        }
+
+                        return (
+                          <a
+                            key={item.url}
+                            href={item.url}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="group block overflow-hidden rounded-md border border-[#e2d7b5] bg-[#f7f3de]"
+                          >
+                            <div className="aspect-square w-full overflow-hidden">
+                              {/* eslint-disable-next-line @next/next/no-img-element */}
+                              <img
+                                src={item.url}
+                                alt={item.name}
+                                className="h-full w-full object-cover transition group-hover:scale-105"
+                              />
+                            </div>
+                            <p className="truncate px-2 py-1 text-[10px] text-[#5b593c]">
+                              {item.name}
+                            </p>
+                          </a>
+                        );
+                      })}
                     </div>
                   ) : (
                     <p className="text-[11px] text-[#7a7f54] italic">
-                      No photos uploaded for this task yet.
+                      No media uploaded for this task yet.
                     </p>
                   )}
                 </div>
