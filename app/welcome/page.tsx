@@ -17,7 +17,7 @@ export default function WelcomePage() {
     setName(session.name);
 
     const timeout = setTimeout(() => {
-      router.replace("/hub");
+      router.replace("/hub/dashboard");
     }, 2500);
 
     return () => clearTimeout(timeout);
