@@ -48,6 +48,60 @@ function clamp(value: number, min: number, max: number) {
   return Math.max(min, Math.min(max, value));
 }
 
+const pipLayout: Record<number, Array<[number, number]>> = {
+  1: [[50, 50]],
+  2: [
+    [30, 30],
+    [70, 70],
+  ],
+  3: [
+    [30, 30],
+    [50, 50],
+    [70, 70],
+  ],
+  4: [
+    [30, 30],
+    [70, 30],
+    [30, 70],
+    [70, 70],
+  ],
+  5: [
+    [30, 30],
+    [70, 30],
+    [50, 50],
+    [30, 70],
+    [70, 70],
+  ],
+  6: [
+    [30, 25],
+    [70, 25],
+    [30, 50],
+    [70, 50],
+    [30, 75],
+    [70, 75],
+  ],
+};
+
+function DiceFace({ value, animate }: { value: number; animate?: boolean }) {
+  const clampedValue = Math.max(1, Math.min(6, Math.round(value)));
+  const pips = pipLayout[clampedValue] || pipLayout[1];
+  return (
+    <div
+      className={`relative w-16 h-16 rounded-2xl border-2 border-[#d6dfc3] bg-white shadow-[0_10px_30px_rgba(96,117,61,0.12)] flex items-center justify-center transition-transform ${
+        animate ? "dice-shake" : "dice-pop"
+      }`}
+    >
+      {pips.map((pip, idx) => (
+        <span
+          key={`${clampedValue}-${idx}`}
+          className="absolute w-3 h-3 rounded-full bg-[#3f4a23] shadow-[0_1px_3px_rgba(0,0,0,0.2)]"
+          style={{ left: `${pip[0]}%`, top: `${pip[1]}%`, transform: "translate(-50%, -50%)" }}
+        />
+      ))}
+    </div>
+  );
+}
+
 export default function GoatArcadePage() {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const wrapperRef = useRef<HTMLDivElement | null>(null);
@@ -79,6 +133,8 @@ export default function GoatArcadePage() {
   const [diceBetAmount, setDiceBetAmount] = useState<number>(5);
   const [diceResult, setDiceResult] = useState<DiceResult>({});
   const [diceLoading, setDiceLoading] = useState(false);
+  const [diceAnimating, setDiceAnimating] = useState(false);
+  const [rollingFaces, setRollingFaces] = useState<[number, number]>([1, 1]);
 
   useEffect(() => {
     const session = loadSession();
@@ -151,6 +207,24 @@ export default function GoatArcadePage() {
       setMessage("Tap or press space to leap fences!");
     }
   }, [activeGame]);
+
+  useEffect(() => {
+    if (!diceAnimating) {
+      if (diceResult.roll && diceResult.roll.length === 2) {
+        setRollingFaces([diceResult.roll[0], diceResult.roll[1]]);
+      }
+      return;
+    }
+
+    const id = setInterval(() => {
+      setRollingFaces([
+        Math.floor(Math.random() * 6) + 1,
+        Math.floor(Math.random() * 6) + 1,
+      ]);
+    }, 90);
+
+    return () => clearInterval(id);
+  }, [diceAnimating, diceResult.roll]);
 
   const fetchStats = async () => {
     try {
@@ -405,6 +479,7 @@ export default function GoatArcadePage() {
     }
 
     setDiceLoading(true);
+    setDiceAnimating(true);
     setDiceResult({});
     try {
       const res = await fetch("/api/goat-stats", {
@@ -420,6 +495,7 @@ export default function GoatArcadePage() {
       const data = await res.json();
       if (!res.ok) {
         setDiceResult({ error: data?.error || "Failed to roll" });
+        setDiceAnimating(false);
         return;
       }
 
@@ -438,13 +514,26 @@ export default function GoatArcadePage() {
         betType: data.betType,
         betAmount: data.betAmount,
       });
+      setTimeout(() => setDiceAnimating(false), 700);
     } catch (err) {
       console.error(err);
       setDiceResult({ error: "Something went wrong." });
+      setDiceAnimating(false);
     } finally {
       setDiceLoading(false);
     }
   };
+
+  const displayDice: [number, number] = diceAnimating
+    ? rollingFaces
+    : diceResult.roll && diceResult.roll.length === 2
+    ? [diceResult.roll[0], diceResult.roll[1]]
+    : rollingFaces;
+
+  const resolvedSum = diceResult.sum ??
+    (diceResult.roll && diceResult.roll.length === 2
+      ? diceResult.roll[0] + diceResult.roll[1]
+      : undefined);
 
   const betOptions: { key: BetType; label: string }[] = [
     { key: "LOW", label: "LOW (2-6)" },
@@ -627,28 +716,44 @@ export default function GoatArcadePage() {
                   <span>Outcome</span>
                   <span className="text-[#6b744d]">Multiplier: LOW/HIGH 2×, SEVEN 5×</span>
                 </div>
-                <div className="mt-3 grid sm:grid-cols-3 gap-3 text-sm text-[#3f4a23]">
-                  <div className="flex flex-col items-center gap-1 bg-white/90 rounded-lg p-3 shadow">
-                    <span className="text-xs uppercase tracking-[0.12em] text-[#6b744d]">Dice</span>
-                    <span className="text-2xl font-bold">
-                      {diceResult.roll ? `${diceResult.roll[0]} • ${diceResult.roll[1]}` : "--"}
-                    </span>
+                <div className="mt-4 flex flex-col md:flex-row md:items-center gap-4">
+                  <div className="flex items-center justify-center gap-3 md:w-52">
+                    <DiceFace value={displayDice[0]} animate={diceAnimating} />
+                    <DiceFace value={displayDice[1]} animate={diceAnimating} />
                   </div>
-                  <div className="flex flex-col items-center gap-1 bg-white/90 rounded-lg p-3 shadow">
-                    <span className="text-xs uppercase tracking-[0.12em] text-[#6b744d]">Sum</span>
-                    <span className="text-2xl font-bold">{diceResult.sum ?? "--"}</span>
-                  </div>
-                  <div className="flex flex-col items-center gap-1 bg-white/90 rounded-lg p-3 shadow">
-                    <span className="text-xs uppercase tracking-[0.12em] text-[#6b744d]">Payout</span>
-                    <span className={`text-2xl font-bold ${diceResult.win ? "text-[#3f7d2e]" : "text-[#a12f2f]"}`}>
-                      {diceResult.win === undefined
-                        ? "--"
-                        : diceResult.win
-                        ? `+${diceResult.payout}`
-                        : `-${diceResult.betAmount ?? 0}`}
-                    </span>
+                  <div className="flex-1 grid sm:grid-cols-3 gap-3 text-sm text-[#3f4a23]">
+                    <div className="flex flex-col items-center gap-1 bg-white/90 rounded-lg p-3 shadow">
+                      <span className="text-xs uppercase tracking-[0.12em] text-[#6b744d]">Sum</span>
+                      <span className="text-2xl font-bold">{resolvedSum ?? "--"}</span>
+                    </div>
+                    <div className="flex flex-col items-center gap-1 bg-white/90 rounded-lg p-3 shadow">
+                      <span className="text-xs uppercase tracking-[0.12em] text-[#6b744d]">Bet</span>
+                      <span className="text-base font-semibold">
+                        {diceResult.betAmount ?? (diceLoading ? "..." : "--")} goats
+                      </span>
+                    </div>
+                    <div className="flex flex-col items-center gap-1 bg-white/90 rounded-lg p-3 shadow">
+                      <span className="text-xs uppercase tracking-[0.12em] text-[#6b744d]">Payout</span>
+                      <span className={`text-2xl font-bold ${diceResult.win ? "text-[#3f7d2e]" : "text-[#a12f2f]"}`}>
+                        {diceResult.win === undefined
+                          ? "--"
+                          : diceResult.win
+                          ? `+${diceResult.payout}`
+                          : `-${diceResult.betAmount ?? 0}`}
+                      </span>
+                    </div>
                   </div>
                 </div>
+              </div>
+
+              <div className="rounded-xl border border-[#d9e5c2] bg-[#f4f8ea] p-4 shadow-inner text-sm text-[#3f4a23]">
+                <div className="font-semibold text-[#2f3618] mb-2">How to play Goat Dice</div>
+                <ul className="space-y-1 text-[#4f5d2a] list-disc list-inside">
+                  <li>Enter a bet amount (deducted when you roll) and choose LOW (2–6), SEVEN, or HIGH (8–12).</li>
+                  <li>Two dice roll together. LOW/HIGH pay 2× your bet; SEVEN pays 5×.</li>
+                  <li>If you win, the payout is added to your goats immediately. If you lose, the bet is gone.</li>
+                  <li>Keep an eye on your balance and have fun—this is a friendly farm casino!</li>
+                </ul>
               </div>
             </div>
           )}
@@ -704,6 +809,30 @@ export default function GoatArcadePage() {
           </div>
         </div>
       </div>
+      <style jsx global>{`
+        @keyframes dice-shake {
+          0% { transform: translate(0, 0) rotate(0deg); }
+          20% { transform: translate(-2px, -2px) rotate(-6deg); }
+          40% { transform: translate(3px, 2px) rotate(4deg); }
+          60% { transform: translate(-3px, 1px) rotate(-3deg); }
+          80% { transform: translate(2px, -2px) rotate(5deg); }
+          100% { transform: translate(0, 0) rotate(0deg); }
+        }
+
+        @keyframes dice-pop {
+          0% { transform: scale(0.94); }
+          60% { transform: scale(1.04); }
+          100% { transform: scale(1); }
+        }
+
+        .dice-shake {
+          animation: dice-shake 0.6s ease;
+        }
+
+        .dice-pop {
+          animation: dice-pop 0.4s ease;
+        }
+      `}</style>
     </div>
   );
 }
