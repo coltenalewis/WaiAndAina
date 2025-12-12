@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { loadSession, saveSession, UserSession } from "@/lib/session";
+import { clearSession, loadSession, saveSession, UserSession } from "@/lib/session";
 
 const allowedWorkTypes = ["admin", "volunteer", "external volunteer"];
 
@@ -41,6 +41,11 @@ export default function HomePage() {
     if (!session?.userType) return false;
     return allowedWorkTypes.includes(session.userType.toLowerCase());
   }, [session?.userType]);
+
+  function handleLogout() {
+    clearSession();
+    setSession(null);
+  }
 
   // Fetch users for login dropdown
   useEffect(() => {
@@ -172,9 +177,11 @@ export default function HomePage() {
                 Work Dashboard
               </Link>
             )}
-            <Link href="/hub/settings" className="rounded-full px-3 py-1.5 hover:bg-[#eef2d9]">
-              Settings
-            </Link>
+            {session && (
+              <Link href="/hub/settings" className="rounded-full px-3 py-1.5 hover:bg-[#eef2d9]">
+                Settings
+              </Link>
+            )}
           </nav>
 
           <div className="flex items-center gap-2">
@@ -183,20 +190,20 @@ export default function HomePage() {
                 Hi, {session.name.split(" ")[0]}
               </span>
             )}
-            {canAccessWork && (
-              <button
-                onClick={() => router.push("/hub/dashboard")}
-                className="hidden sm:inline-flex items-center rounded-full bg-[#a0b764] text-white px-3 py-2 text-xs font-semibold shadow hover:bg-[#8ba450]"
-              >
-                Go to Work Dashboard
-              </button>
-            )}
             <button
               onClick={() => setShowLogin(true)}
               className="inline-flex items-center rounded-full border border-[#c8cba0] bg-white px-3 py-2 text-xs font-semibold hover:bg-[#f1edd8] shadow-sm"
             >
               {session ? "Switch user" : "Login"}
             </button>
+            {session && (
+              <button
+                onClick={handleLogout}
+                className="inline-flex items-center rounded-full bg-[#e4e4d0] text-[#4a4f2f] px-3 py-2 text-xs font-semibold shadow hover:bg-[#d7d9c0]"
+              >
+                Logout
+              </button>
+            )}
           </div>
         </div>
       </header>
@@ -311,45 +318,6 @@ export default function HomePage() {
                 </span>
               </Link>
             ))}
-          </div>
-        </div>
-      </section>
-
-      {/* Work dashboard callout */}
-      <section className="max-w-6xl mx-auto px-4 sm:px-6 py-12">
-        <div className="rounded-2xl border border-[#d0c9a4] bg-white shadow-md overflow-hidden">
-          <div className="grid md:grid-cols-2">
-            <div className="p-7 space-y-4">
-              <p className="text-xs uppercase tracking-[0.2em] text-[#7a7f54]">Work dashboard</p>
-              <h3 className="text-2xl font-semibold text-[#3b4224]">Stay on top of requests, schedules, and games</h3>
-              <p className="text-sm text-[#4b5133] leading-relaxed">
-                Jump into the work dashboard to manage tasks, check requests, play the goat arcade, and review guides—all in one place. If you have the right access, the dashboard awaits.
-              </p>
-              <div className="flex flex-wrap gap-3">
-                {canAccessWork ? (
-                  <button
-                    onClick={() => router.push("/hub/dashboard")}
-                    className="inline-flex items-center gap-2 rounded-full bg-[#a0b764] text-white px-4 py-3 text-sm font-semibold shadow hover:bg-[#8ba450]"
-                  >
-                    Open Work Dashboard
-                  </button>
-                ) : (
-                  <button
-                    onClick={() => setShowLogin(true)}
-                    className="inline-flex items-center gap-2 rounded-full bg-[#5d7f3b] text-white px-4 py-3 text-sm font-semibold shadow hover:bg-[#4c682f]"
-                  >
-                    Login to continue
-                  </button>
-                )}
-                <Link
-                  href="/hub/goat"
-                  className="inline-flex items-center gap-2 rounded-full border border-[#c8cba0] bg-[#f1edd8] px-4 py-3 text-sm font-semibold text-[#3b4224] hover:bg-white"
-                >
-                  🐐 Arcade
-                </Link>
-              </div>
-            </div>
-            <div className="bg-[url('https://images.unsplash.com/photo-1500534314209-a25ddb2bd429?auto=format&fit=crop&w=1200&q=80')] bg-cover bg-center min-h-[220px] md:min-h-full" />
           </div>
         </div>
       </section>

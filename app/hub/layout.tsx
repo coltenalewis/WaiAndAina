@@ -64,6 +64,11 @@ export default function HubLayout({ children }: { children: ReactNode }) {
     return links;
   }, [isExternalVolunteer]);
 
+  const workLinkHrefs = useMemo(
+    () => workLinks.map((link) => link.href),
+    [workLinks]
+  );
+
   function handleLogout() {
     clearSession();
     router.replace("/");
@@ -176,6 +181,12 @@ export default function HubLayout({ children }: { children: ReactNode }) {
       clearInterval(interval);
     };
   }, []);
+
+  const showOnlineRibbon =
+    canAccessWork &&
+    workLinkHrefs.some(
+      (href) => pathname === href || pathname.startsWith(`${href}/`)
+    );
 
   return (
     <main className="min-h-screen flex flex-col bg-[#f8f4e3] text-[#3b4224]">
@@ -467,7 +478,7 @@ export default function HubLayout({ children }: { children: ReactNode }) {
         </div>
       </header>
 
-      {onlineUsers.length > 0 && (
+      {showOnlineRibbon && onlineUsers.length > 0 && (
         <div className="bg-[#eef2d9]/70 border-b border-[#d7d0ad]">
           <div className="max-w-6xl mx-auto px-3 sm:px-4 py-1.5 flex items-center gap-2 overflow-x-auto no-scrollbar text-[#405124]">
             <span className="inline-flex items-center gap-1 rounded-full bg-[#f7f4e6] px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] border border-[#d0c9a4] shadow-sm">
