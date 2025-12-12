@@ -377,6 +377,26 @@ export default function HubSchedulePage() {
     [workSlots]
   );
 
+  const hasStandardScheduleContent = useMemo(() => {
+    if (!data || standardWorkSlots.length === 0) return false;
+
+    const slotIndexes = standardWorkSlots
+      .map((slot) => data.slots.findIndex((s) => s.id === slot.id))
+      .filter((idx) => idx >= 0);
+
+    if (slotIndexes.length === 0) return false;
+
+    return data.cells.some((row) =>
+      slotIndexes.some((idx) => {
+        const cell = (row?.[idx] ?? "").trim();
+        return splitCellTasks(cell).length > 0;
+      })
+    );
+  }, [data, standardWorkSlots]);
+
+  const showStandardSection =
+    !isExternalVolunteer && (loading || error || hasStandardScheduleContent);
+
   const eveningSlots = useMemo(
     () =>
       workSlots.filter(
@@ -757,6 +777,10 @@ export default function HubSchedulePage() {
     await loadTaskDetails(baseTitle);
   }
 
+
+  // When a task box is clicked
+
+
   function closeModal() {
     setModalTask(null);
     setModalDetails(null);
@@ -846,7 +870,7 @@ export default function HubSchedulePage() {
           </section>
         )}
 
-        {!isExternalVolunteer && (
+        {showStandardSection && (
           <section className="space-y-3">
             <h2 className="text-2xl font-semibold tracking-[0.18em] uppercase text-[#5d7f3b]">
               Todays Schedule

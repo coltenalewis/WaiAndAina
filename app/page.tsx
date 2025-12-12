@@ -20,6 +20,7 @@ export default function HomePage() {
   const router = useRouter();
   const [session, setSession] = useState<UserSession | null>(null);
   const [showLogin, setShowLogin] = useState(false);
+  const [showMobileMenu, setShowMobileMenu] = useState(false);
 
   // Users from Notion (names only)
   const [users, setUsers] = useState<string[]>([]);
@@ -137,6 +138,13 @@ export default function HomePage() {
       <header className="sticky top-0 z-20 w-full bg-white/90 backdrop-blur shadow-sm">
         <div className="max-w-6xl mx-auto px-4 sm:px-6 py-3 flex items-center justify-between gap-3">
           <div className="flex items-center gap-3">
+            <button
+              className="md:hidden inline-flex items-center justify-center rounded-full border border-[#d0c9a4] bg-white h-10 w-10 text-lg shadow-sm"
+              onClick={() => setShowMobileMenu(true)}
+              aria-label="Open menu"
+            >
+              ☰
+            </button>
             <div className="h-10 w-10 rounded-full bg-[#f1e4b5] flex items-center justify-center shadow">
               <span className="text-xl">🐐</span>
             </div>
@@ -208,6 +216,107 @@ export default function HomePage() {
           </div>
         </div>
       </header>
+
+      {/* Mobile menu */}
+      {showMobileMenu && (
+        <div className="fixed inset-0 z-40 bg-black/40 backdrop-blur-sm md:hidden" onClick={() => setShowMobileMenu(false)}>
+          <div
+            className="absolute left-0 top-0 h-full w-72 bg-[#f8f4e3] border-r border-[#d0c9a4] shadow-2xl p-4 flex flex-col gap-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="h-10 w-10 rounded-full bg-[#f1e4b5] flex items-center justify-center shadow">
+                  <span className="text-xl">🐐</span>
+                </div>
+                <div className="leading-tight">
+                  <p className="text-sm font-semibold text-[#3b4224]">Wai &amp; Aina</p>
+                  <p className="text-[11px] text-[#7a7f54]">Farm hub</p>
+                </div>
+              </div>
+              <button
+                className="rounded-full bg-white px-2 py-1 text-xs font-semibold text-[#4a4f2f] border border-[#d0c9a4]"
+                onClick={() => setShowMobileMenu(false)}
+                aria-label="Close menu"
+              >
+                ✕
+              </button>
+            </div>
+
+            <nav className="flex flex-col gap-2 text-sm font-semibold text-[#3b4224]">
+              <Link href="#home" onClick={() => setShowMobileMenu(false)} className="rounded-lg px-3 py-2 hover:bg-white">
+                Home
+              </Link>
+              <Link href="#about" onClick={() => setShowMobileMenu(false)} className="rounded-lg px-3 py-2 hover:bg-white">
+                About Us
+              </Link>
+              <div className="rounded-lg bg-white px-3 py-2 shadow-inner">
+                <p className="text-xs uppercase tracking-[0.18em] text-[#7a7f54] mb-2">Farm Information</p>
+                <div className="flex flex-col gap-1 font-medium">
+                  <Link
+                    href="/hub/guides/animalpedia"
+                    onClick={() => setShowMobileMenu(false)}
+                    className="rounded-md px-2 py-2 hover:bg-[#f1edd8]"
+                  >
+                    Animalpedia
+                  </Link>
+                  <Link
+                    href="/hub/guides/farm-map"
+                    onClick={() => setShowMobileMenu(false)}
+                    className="rounded-md px-2 py-2 hover:bg-[#f1edd8]"
+                  >
+                    Farm Map
+                  </Link>
+                  <Link
+                    href="/hub/guides/how-to"
+                    onClick={() => setShowMobileMenu(false)}
+                    className="rounded-md px-2 py-2 hover:bg-[#f1edd8]"
+                  >
+                    Guides
+                  </Link>
+                </div>
+              </div>
+              {canAccessWork && (
+                <Link
+                  href="/hub/dashboard"
+                  onClick={() => setShowMobileMenu(false)}
+                  className="rounded-lg px-3 py-2 hover:bg-white"
+                >
+                  Work Dashboard
+                </Link>
+              )}
+              {session && (
+                <Link
+                  href="/hub/settings"
+                  onClick={() => setShowMobileMenu(false)}
+                  className="rounded-lg px-3 py-2 hover:bg-white"
+                >
+                  Settings
+                </Link>
+              )}
+            </nav>
+
+            <div className="mt-auto flex items-center justify-between">
+              {session?.name ? (
+                <div className="text-xs text-[#56652f]">
+                  Hi, {session.name.split(" ")[0]}
+                </div>
+              ) : (
+                <div className="text-xs text-[#7a7f54]">Welcome!</div>
+              )}
+              <button
+                onClick={() => {
+                  setShowMobileMenu(false);
+                  setShowLogin(true);
+                }}
+                className="inline-flex items-center rounded-full border border-[#c8cba0] bg-white px-3 py-2 text-xs font-semibold hover:bg-[#f1edd8] shadow-sm"
+              >
+                {session ? "Switch user" : "Login"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Hero */}
       <section
