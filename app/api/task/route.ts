@@ -16,8 +16,8 @@ const TASK_DESC_PROPERTY_KEY = "Description"; // rich_text
 const TASK_STATUS_PROPERTY_KEY = "Status"; // select
 const TASK_PHOTOS_PROPERTY_KEY = "Photos"; // files
 const TASK_TYPE_PROPERTY_KEY = "Task Type"; // select
-const TASK_LINKS_PROPERTY_KEY = "Links"; // rich_text / url
-const TASK_ESTIMATE_PROPERTY_KEY = "Estimated Time"; // rich_text
+const TASK_LINKS_PROPERTY_KEY = "Links"; // rich_text or url
+const TASK_ESTIMATE_PROPERTY_KEY = "Estimated Time"; // rich_text or text
 
 // ─────────────────────────────────────────────
 // Helpers
@@ -25,26 +25,46 @@ const TASK_ESTIMATE_PROPERTY_KEY = "Estimated Time"; // rich_text
 function getPlainText(prop: any): string {
   if (!prop) return "";
 
+  // Sometimes we pass arrays (e.g., comment rich_text) directly
   if (Array.isArray(prop)) {
-    return prop.map((t: any) => t.plain_text || "").join("").trim();
+    return prop
+      .map((t: any) => t.plain_text || "")
+      .join("")
+      .trim();
   }
 
   switch (prop.type) {
     case "title":
-      return (prop.title || []).map((t: any) => t.plain_text || "").join("").trim();
+      return (prop.title || [])
+        .map((t: any) => t.plain_text || "")
+        .join("")
+        .trim();
     case "rich_text":
-      return (prop.rich_text || []).map((t: any) => t.plain_text || "").join("").trim();
+      return (prop.rich_text || [])
+        .map((t: any) => t.plain_text || "")
+        .join("")
+        .trim();
     case "select":
       return prop.select?.name || "";
     case "multi_select":
-      return (prop.multi_select || []).map((s: any) => s.name || "").join(", ").trim();
+      return (prop.multi_select || [])
+        .map((s: any) => s.name || "")
+        .join(", ")
+        .trim();
     case "url":
       return prop.url || "";
     case "files":
-      return (prop.files || []).map((f: any) => f.name || "").join(", ").trim();
+      return (prop.files || [])
+        .map((f: any) => f.name || "")
+        .join(", ")
+        .trim();
     default:
+      // Fallback for unexpected shapes
       if (Array.isArray(prop.rich_text)) {
-        return prop.rich_text.map((t: any) => t.plain_text || "").join("").trim();
+        return prop.rich_text
+          .map((t: any) => t.plain_text || "")
+          .join("")
+          .trim();
       }
       return "";
   }
@@ -55,12 +75,15 @@ function parseLinks(raw: string): { label: string; url: string }[] {
 
   return raw
     .split(",")
-    .map((e) => e.trim())
+    .map((entry) => entry.trim())
     .filter(Boolean)
     .map((entry) => {
-      const match = entry.match(/^\[(.+?)\](.+)$/);
-      if (match) {
-        return { label: match[1].trim(), url: match[2].trim() };
+      const bracketMatch = entry.match(/^\[(.+?)\](.+)$/);
+      if (bracketMatch) {
+        return {
+          label: bracketMatch[1].trim(),
+          url: bracketMatch[2].trim(),
+        };
       }
       return { label: entry, url: entry };
     });
@@ -79,12 +102,13 @@ async function findTaskPageByName(name: string) {
 
   if (data.results?.length) return data.results[0];
 
+  // Fallback: return the first page if no exact match
   const fallback = await queryDatabase(TASKS_DB_ID, { page_size: 1 });
   return fallback.results?.[0] ?? null;
 }
 
 // ─────────────────────────────────────────────
-// GET — fetch task details
+// GET — fetch a task by name
 // ─────────────────────────────────────────────
 export async function GET(req: Request) {
   if (!TASKS_DB_ID) {
@@ -110,10 +134,10 @@ export async function GET(req: Request) {
     const props = page.properties || {};
 
     const pageName = getPlainText(props[TASK_NAME_PROPERTY_KEY]) || name;
-    const description = getPlainText(props[TASK_DESC_PROPERTY_KEY]);
-    const status = getPlainText(props[TASK_STATUS_PROPERTY_KEY]);
+    const description = getPlainText(props[TASK_DESC_PROPERTY_KEY]) || "";
+    const status = getPlainText(props[TASK_STATUS_PROPERTY_KEY]) || "";
     const links = parseLinks(getPlainText(props[TASK_LINKS_PROPERTY_KEY]));
-    const estimatedTime = getPlainText(props[TASK_ESTIMATE_PROPERTY_KEY]);
+    const estimatedTime = getPlainText(props[TASK_ESTIMATE_PROPERTY_KEY]) || "";
 
     const typeProp = props[TASK_TYPE_PROPERTY_KEY];
     const taskType =
@@ -130,12 +154,17 @@ export async function GET(req: Request) {
         ? (photosProp.files || []).map((file: any) => {
             const fileName = file.name || "Attachment";
             const url = file.external?.url || file.file?.url || "";
-            const lower = fileName.toLowerCase();
 
+            const lower = fileName.toLowerCase();
             let kind: "image" | "video" | "audio" | "file" = "file";
-            if (/(\.png|\.jpe?g|\.gif|\.webp|\.avif)$/i.test(lower)) kind = "image";
-            else if (/(\.mp4|\.mov|\.m4v)$/i.test(lower)) kind = "video";
-            else if (/(\.mp3|\.wav|\.m4a)$/i.test(lower)) kind = "audio";
+
+            if (/(\.png|\.jpe?g|\.gif|\.webp|\.avif)$/i.test(lower)) {
+              kind = "image";
+            } else if (/(\.mp4|\.mov|\.m4v)$/i.test(lower)) {
+              kind = "video";
+            } else if (/(\.mp3|\.wav|\.m4a)$/i.test(lower)) {
+              kind = "audio";
+            }
 
             return { name: fileName, url, kind };
           })
@@ -143,15 +172,19 @@ export async function GET(req: Request) {
 
     const commentsRaw = await retrieveComments(page.id);
     const comments = (commentsRaw.results || []).map((c: any) => {
-      const raw = getPlainText(c.rich_text) || "";
-      const idx = raw.indexOf(":");
+      const rawText = getPlainText(c.rich_text) || "";
+      const colonIndex = rawText.indexOf(":");
+
+      const parsedAuthor =
+        colonIndex > -1 ? rawText.slice(0, colonIndex).trim() : "";
+      const parsedMessage =
+        colonIndex > -1 ? rawText.slice(colonIndex + 1).trim() : rawText;
 
       return {
         id: c.id,
-        text: idx > -1 ? raw.slice(idx + 1).trim() : raw,
-        author:
-          idx > -1 ? raw.slice(0, idx).trim() : c.created_by?.name || "Unknown",
+        text: parsedMessage,
         createdTime: c.created_time,
+        author: parsedAuthor || c.created_by?.name || "Unknown",
       };
     });
 
@@ -206,7 +239,10 @@ export async function PATCH(req: Request) {
     return NextResponse.json({ success: true, status });
   } catch (err) {
     console.error("PATCH /task failed:", err);
-    return NextResponse.json({ error: "Failed to update status" }, { status: 500 });
+    return NextResponse.json(
+      { error: "Failed to update status" },
+      { status: 500 }
+    );
   }
 }
 
@@ -247,6 +283,9 @@ export async function POST(req: Request) {
     return NextResponse.json({ success: true });
   } catch (err) {
     console.error("POST /task failed:", err);
-    return NextResponse.json({ error: "Failed to add comment" }, { status: 500 });
+    return NextResponse.json(
+      { error: "Failed to add comment" },
+      { status: 500 }
+    );
   }
 }

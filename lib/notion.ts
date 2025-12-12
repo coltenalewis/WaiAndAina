@@ -198,6 +198,26 @@ export async function listBlockChildren(
   return res.json();
 }
 
+export async function listAllBlockChildren(blockId: string) {
+  let startCursor: string | undefined = undefined;
+  let hasMore = true;
+  const allResults: any[] = [];
+  let lastResponse: any = null;
+
+  while (hasMore) {
+    const response = await listBlockChildren(blockId, startCursor);
+    lastResponse = response;
+    allResults.push(...(response.results || []));
+    hasMore = Boolean(response.has_more && response.next_cursor);
+    startCursor = response.next_cursor as string | undefined;
+  }
+
+  return {
+    ...(lastResponse || {}),
+    results: allResults,
+  };
+}
+
 export async function retrieveBlock(blockId: string) {
   const res = await fetch(`${NOTION_BASE_URL}/blocks/${blockId}`, {
     headers: {

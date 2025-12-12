@@ -4,8 +4,9 @@ import { queryDatabase } from "@/lib/notion";
 const USERS_DB_ID = process.env.NOTION_USERS_DATABASE_ID!;
 
 // These must match your Notion property names in the Users database
-const NAME_PROPERTY_KEY = "Name";   // or "Name" if that is what you used
+const NAME_PROPERTY_KEY = "Name"; // or "Name" if that is what you used
 const PASSWORD_PROPERTY_KEY = "Password";
+const USER_TYPE_PROPERTY_KEY = "User Type";
 
 function getPlainText(prop: any): string {
   if (!prop) return "";
@@ -68,6 +69,8 @@ export async function POST(req: Request) {
     const normalizedPass = password.trim();
 
     let matchFound = false;
+    let matchedUserType: string | null = null;
+    let matchedUserTypeColor: string | null = null;
 
     for (const page of pages) {
       const props = page.properties || {};
@@ -78,6 +81,9 @@ export async function POST(req: Request) {
         pageName === normalizedName &&
         pagePass === normalizedPass
       ) {
+        const rawType = props[USER_TYPE_PROPERTY_KEY];
+        matchedUserType = rawType ? getPlainText(rawType) : null;
+        matchedUserTypeColor = rawType?.select?.color || null;
         matchFound = true;
         break;
       }
@@ -90,7 +96,12 @@ export async function POST(req: Request) {
       );
     }
 
-    return NextResponse.json({ ok: true, name });
+    return NextResponse.json({
+      ok: true,
+      name,
+      userType: matchedUserType,
+      userTypeColor: matchedUserTypeColor,
+    });
   } catch (err) {
     console.error("Login check failed:", err);
     return NextResponse.json(

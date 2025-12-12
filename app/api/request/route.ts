@@ -16,6 +16,7 @@ const DESCRIPTION_KEY = "Description";
 const USER_KEY = "User";
 const STATUS_KEY = "Status";
 const ANONYMOUS_KEY = "Anonymous";
+const REQUEST_TYPE_KEY = "Request Type";
 
 const MAX_NAME_WORDS = 8;
 const MAX_NAME_CHARS = 80;
@@ -51,6 +52,7 @@ function getPlainText(prop: any): string {
 
 function mapPageToRequest(page: any) {
   const props = page.properties || {};
+  const typeProp = props[REQUEST_TYPE_KEY];
   return {
     id: page.id,
     name: getPlainText(props[NAME_KEY]) || "Untitled Request",
@@ -58,6 +60,13 @@ function mapPageToRequest(page: any) {
     user: getPlainText(props[USER_KEY]) || "Unknown",
     status: getPlainText(props[STATUS_KEY]) || "Pending",
     anonymous: props[ANONYMOUS_KEY]?.checkbox || false,
+    requestType:
+      typeProp?.type === "select"
+        ? {
+            name: typeProp.select?.name || "",
+            color: typeProp.select?.color || "default",
+          }
+        : null,
     createdTime: page.created_time,
   };
 }
@@ -147,7 +156,16 @@ export async function POST(req: Request) {
   }
 
   const body = await req.json().catch(() => null);
-  const { name, description, user, action, id, comment, anonymous } = body || {};
+  const {
+    name,
+    description,
+    user,
+    action,
+    id,
+    comment,
+    anonymous,
+    requestType,
+  } = body || {};
 
   if (action === "comment") {
     if (!id || !comment || !user) {
@@ -224,6 +242,13 @@ export async function POST(req: Request) {
       [ANONYMOUS_KEY]: {
         checkbox: !!anonymous,
       },
+      ...(requestType
+        ? {
+            [REQUEST_TYPE_KEY]: {
+              select: { name: requestType },
+            },
+          }
+        : {}),
     });
 
     return NextResponse.json({ success: true, request: mapPageToRequest(page) });
@@ -245,7 +270,7 @@ export async function PATCH(req: Request) {
   }
 
   const body = await req.json().catch(() => null);
-  const { id, name, description, action, anonymous } = body || {};
+  const { id, name, description, action, anonymous, requestType } = body || {};
 
   if (!id) {
     return NextResponse.json({ error: "Missing request id" }, { status: 400 });
@@ -319,6 +344,11 @@ export async function PATCH(req: Request) {
       [ANONYMOUS_KEY]: {
         checkbox: !!anonymous,
       },
+      ...(requestType
+        ? {
+            [REQUEST_TYPE_KEY]: { select: { name: requestType } },
+          }
+        : {}),
     });
 
     return NextResponse.json({ success: true, request: mapPageToRequest(updated) });

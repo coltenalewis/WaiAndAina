@@ -3,11 +3,24 @@
 import { useEffect, useMemo, useState } from "react";
 import { loadSession } from "@/lib/session";
 
-const STATUS_COLORS: Record<string, string> = {
-  Pending: "bg-amber-100 text-amber-800 border-amber-200",
-  Approved: "bg-emerald-100 text-emerald-800 border-emerald-200",
-  Denied: "bg-rose-100 text-rose-800 border-rose-200",
-};
+type Option = { name: string; color: string };
+
+function optionColorClasses(color?: string) {
+  const map: Record<string, string> = {
+    default: "bg-slate-100 text-slate-800 border-slate-200",
+    gray: "bg-slate-100 text-slate-800 border-slate-200",
+    brown: "bg-amber-100 text-amber-900 border-amber-200",
+    orange: "bg-orange-100 text-orange-900 border-orange-200",
+    yellow: "bg-amber-100 text-amber-900 border-amber-200",
+    green: "bg-emerald-100 text-emerald-900 border-emerald-200",
+    blue: "bg-sky-100 text-sky-900 border-sky-200",
+    purple: "bg-violet-100 text-violet-900 border-violet-200",
+    pink: "bg-pink-100 text-pink-900 border-pink-200",
+    red: "bg-rose-100 text-rose-900 border-rose-200",
+  };
+
+  return map[color || "default"] || map.default;
+}
 
 const MAX_NAME_WORDS = 8;
 const MAX_NAME_CHARS = 80;
@@ -21,6 +34,7 @@ type RequestSummary = {
   status: string;
   createdTime: string;
   anonymous?: boolean;
+  requestType?: Option | null;
 };
 
 type RequestComment = {
@@ -40,12 +54,15 @@ export default function HubRequestPage() {
   const [sessionName, setSessionName] = useState("");
   const [onlyMine, setOnlyMine] = useState(false);
   const [statusFilter, setStatusFilter] = useState("All");
+  const [statusOptions, setStatusOptions] = useState<Option[]>([]);
+  const [requestTypeOptions, setRequestTypeOptions] = useState<Option[]>([]);
   const [createOpen, setCreateOpen] = useState(false);
   const [createName, setCreateName] = useState("");
   const [createDesc, setCreateDesc] = useState("");
   const [createError, setCreateError] = useState("");
   const [createBusy, setCreateBusy] = useState(false);
   const [createAnonymous, setCreateAnonymous] = useState(false);
+  const [createRequestType, setCreateRequestType] = useState("");
 
   const [activeRequest, setActiveRequest] = useState<RequestDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
@@ -57,6 +74,7 @@ export default function HubRequestPage() {
   const [editBusy, setEditBusy] = useState(false);
   const [editError, setEditError] = useState("");
   const [editAnonymous, setEditAnonymous] = useState(false);
+  const [editRequestType, setEditRequestType] = useState("");
 
   useEffect(() => {
     const session = loadSession();
@@ -64,7 +82,27 @@ export default function HubRequestPage() {
       setSessionName(session.name);
     }
     fetchRequests();
+    fetchOptions();
   }, []);
+
+  async function fetchOptions() {
+    try {
+      const res = await fetch("/api/request/options");
+      if (!res.ok) return;
+      const data = await res.json();
+      if (Array.isArray(data.statuses)) {
+        setStatusOptions(data.statuses as Option[]);
+      }
+      if (Array.isArray(data.requestTypes)) {
+        setRequestTypeOptions(data.requestTypes as Option[]);
+        if (!createRequestType && data.requestTypes[0]?.name) {
+          setCreateRequestType(data.requestTypes[0].name);
+        }
+      }
+    } catch (err) {
+      console.error("Failed to load request options", err);
+    }
+  }
 
   async function fetchRequests() {
     setLoading(true);
@@ -87,16 +125,17 @@ export default function HubRequestPage() {
     try {
       const res = await fetch(`/api/request?id=${encodeURIComponent(id)}`);
       const data = await res.json();
-      if (res.ok) {
-        const detail: RequestDetail = {
-          comments: [],
-          ...data,
-        };
-        setActiveRequest(detail);
-        setEditName(detail.name);
-        setEditDesc(detail.description);
-        setEditAnonymous(!!detail.anonymous);
-      }
+        if (res.ok) {
+          const detail: RequestDetail = {
+            comments: [],
+            ...data,
+          };
+          setActiveRequest(detail);
+          setEditName(detail.name);
+          setEditDesc(detail.description);
+          setEditAnonymous(!!detail.anonymous);
+          setEditRequestType(detail.requestType?.name || "");
+        }
     } catch (err) {
       console.error("Failed to load request detail", err);
     } finally {
@@ -123,6 +162,14 @@ export default function HubRequestPage() {
     () => editName.trim().split(/\s+/).filter(Boolean).length,
     [editName]
   );
+
+  const statusColorLookup = useMemo(() => {
+    const map: Record<string, string> = {};
+    statusOptions.forEach((opt) => {
+      map[opt.name] = opt.color;
+    });
+    return map;
+  }, [statusOptions]);
 
   async function handleCreate() {
     if (!sessionName) {
@@ -159,6 +206,7 @@ export default function HubRequestPage() {
           description: createDesc.trim(),
           user: sessionName,
           anonymous: createAnonymous,
+          requestType: createRequestType,
         }),
       });
       const data = await res.json();
@@ -171,6 +219,11 @@ export default function HubRequestPage() {
       setCreateName("");
       setCreateDesc("");
       setCreateAnonymous(false);
+      setCreateRequestType(
+        requestTypeOptions.find((opt) => opt.name === createRequestType)?.name ||
+          requestTypeOptions[0]?.name ||
+          ""
+      );
       setCreateOpen(false);
     } catch (err) {
       console.error("Failed to submit request", err);
@@ -242,6 +295,7 @@ export default function HubRequestPage() {
           name: editName.trim(),
           description: editDesc.trim(),
           anonymous: editAnonymous,
+          requestType: editRequestType,
         }),
       });
       const data = await res.json();
@@ -291,7 +345,7 @@ export default function HubRequestPage() {
   }
 
   function statusBadge(status: string) {
-    const classes = STATUS_COLORS[status] || "bg-slate-100 text-slate-700 border-slate-200";
+    const classes = optionColorClasses(statusColorLookup[status]);
     return (
       <span
         className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-semibold uppercase tracking-[0.12em] ${classes}`}
@@ -340,9 +394,9 @@ export default function HubRequestPage() {
                 className="rounded-full border border-[#cdd7ab] bg-white px-3 py-1 text-xs font-semibold uppercase tracking-[0.12em] text-[#4a5b2a] focus:outline-none focus:ring-2 focus:ring-[#a0b764]"
               >
                 <option>All</option>
-                <option>Pending</option>
-                <option>Approved</option>
-                <option>Denied</option>
+                {statusOptions.map((opt) => (
+                  <option key={opt.name}>{opt.name}</option>
+                ))}
               </select>
             </div>
           </div>
@@ -366,6 +420,13 @@ export default function HubRequestPage() {
                     <h3 className="text-base font-semibold text-[#3b4224]">{req.name}</h3>
                     {statusBadge(req.status)}
                   </div>
+                  {req.requestType?.name && (
+                    <span
+                      className={`inline-flex items-center gap-2 rounded-full border px-2.5 py-[2px] text-[11px] font-semibold uppercase tracking-[0.12em] ${optionColorClasses(req.requestType.color)}`}
+                    >
+                      {req.requestType.name}
+                    </span>
+                  )}
                   <p className="text-sm text-[#5b6240] line-clamp-2">{req.description}</p>
                   <div className="text-[11px] uppercase tracking-[0.14em] text-[#777f57] flex items-center gap-2">
                     <span className="font-semibold">{req.anonymous ? "Anonymous" : req.user}</span>
@@ -431,6 +492,25 @@ export default function HubRequestPage() {
                   placeholder="Share details, context, or timing"
                 />
               </div>
+
+              {requestTypeOptions.length > 0 && (
+                <div>
+                  <div className="flex items-center justify-between text-xs text-[#6b7348]">
+                    <label className="font-semibold uppercase tracking-[0.14em]">Request Type</label>
+                  </div>
+                  <select
+                    value={createRequestType}
+                    onChange={(e) => setCreateRequestType(e.target.value)}
+                    className="mt-1 w-full rounded-md border border-[#d5d7bc] bg-white px-3 py-2 text-sm text-[#3b4224] focus:outline-none focus:ring-2 focus:ring-[#a0b764]"
+                  >
+                    {requestTypeOptions.map((opt) => (
+                      <option key={opt.name} value={opt.name}>
+                        {opt.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
 
               <label className="mt-1 inline-flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.14em] text-[#556036]">
                 <input
@@ -511,6 +591,13 @@ export default function HubRequestPage() {
 
                 {!editMode && <p className="mt-2 text-sm text-[#4c5331] whitespace-pre-line">{activeRequest.description}</p>}
 
+                {!editMode && activeRequest.requestType?.name && (
+                  <div className="mt-3 inline-flex items-center gap-2 rounded-full border px-3 py-[6px] text-[11px] font-semibold uppercase tracking-[0.12em] text-[#3b4224] bg-white shadow-sm">
+                    <span className={`inline-flex h-2.5 w-2.5 rounded-full ${optionColorClasses(activeRequest.requestType.color)}`} />
+                    <span>{activeRequest.requestType.name}</span>
+                  </div>
+                )}
+
                 {editMode && (
                   <div className="mt-3 space-y-3">
                     <div className="flex items-center justify-between text-xs text-[#6b7348]">
@@ -535,6 +622,25 @@ export default function HubRequestPage() {
                       className="w-full rounded-md border border-[#d5d7bc] bg-white px-3 py-2 text-sm text-[#3b4224] focus:outline-none focus:ring-2 focus:ring-[#a0b764]"
                       rows={4}
                     />
+
+                    {requestTypeOptions.length > 0 && (
+                      <div className="space-y-1">
+                        <label className="text-xs font-semibold uppercase tracking-[0.14em] text-[#556036]">
+                          Request Type
+                        </label>
+                        <select
+                          value={editRequestType}
+                          onChange={(e) => setEditRequestType(e.target.value)}
+                          className="w-full rounded-md border border-[#d5d7bc] bg-white px-3 py-2 text-sm text-[#3b4224] focus:outline-none focus:ring-2 focus:ring-[#a0b764]"
+                        >
+                          {requestTypeOptions.map((opt) => (
+                            <option key={opt.name} value={opt.name}>
+                              {opt.name}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
 
                     <label className="inline-flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.14em] text-[#556036]">
                       <input
