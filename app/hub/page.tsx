@@ -91,6 +91,7 @@ export default function HubSchedulePage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [currentUserName, setCurrentUserName] = useState<string | null>(null);
+  const [currentUserType, setCurrentUserType] = useState<string | null>(null);
   const [currentSlotId, setCurrentSlotId] = useState<string | null>(null);
   const scheduleScrollRef = useRef<HTMLDivElement | null>(null);
 
@@ -114,10 +115,14 @@ export default function HubSchedulePage() {
     "Completed",
   ];
 
+  const isExternalVolunteer =
+    (currentUserType || "").toLowerCase() === "external volunteer";
+
   // Get logged-in user from session
   useEffect(() => {
     const session = loadSession();
     if (session?.name) setCurrentUserName(session.name);
+    if (session?.userType) setCurrentUserType(session.userType);
   }, []);
 
   useEffect(() => {
@@ -349,7 +354,9 @@ export default function HubSchedulePage() {
   );
 
   const showEveningSection =
-    eveningCombined.length > 0 && userHasTasksForSlots(eveningSlots);
+    !isExternalVolunteer &&
+    eveningCombined.length > 0 &&
+    userHasTasksForSlots(eveningSlots);
   const showWeekendSection =
     weekendCombined.length > 0 && userHasTasksForSlots(weekendSlots);
 
@@ -640,7 +647,7 @@ export default function HubSchedulePage() {
   return (
     <>
       <div className="space-y-8">
-        {taskTypes.length > 0 && (
+        {!isExternalVolunteer && taskTypes.length > 0 && (
           <section className="rounded-lg border border-[#d0c9a4] bg-white/80 px-4 py-3 shadow-sm">
             <div className="flex items-center justify-between gap-3">
               <div>
@@ -656,152 +663,162 @@ export default function HubSchedulePage() {
           </section>
         )}
 
-        {/* Meal Assignments */}
-        <section>
-          <h2 className="text-2xl font-semibold tracking-[0.18em] uppercase text-[#5d7f3b] mb-4">
-            Meal Assignments
-          </h2>
+        {!isExternalVolunteer && (
+          <section>
+            <h2 className="text-2xl font-semibold tracking-[0.18em] uppercase text-[#5d7f3b] mb-4">
+              Meal Assignments
+            </h2>
 
-          {loading && (
-            <p className="text-sm text-[#7a7f54]">Loading schedule…</p>
-          )}
-          {error && <p className="text-sm text-red-700">{error}</p>}
+            {loading && (
+              <p className="text-sm text-[#7a7f54]">Loading schedule…</p>
+            )}
+            {error && <p className="text-sm text-red-700">{error}</p>}
 
-          {!loading && !error && visibleMealSlots.length === 0 && (
-            <p className="text-sm text-[#7a7f54]">No meal assignments found.</p>
-          )}
+            {!loading && !error && visibleMealSlots.length === 0 && (
+              <p className="text-sm text-[#7a7f54]">No meal assignments found.</p>
+            )}
 
-          <div className="space-y-4">
-            {visibleMealSlots.map((slot) => (
-              <MealBlock
-                key={slot.id}
-                slot={slot}
-                assignments={mealAssignments.filter(
-                  (a) => a.slotId === slot.id
+            <div className="space-y-4">
+              {visibleMealSlots.map((slot) => (
+                <MealBlock
+                  key={slot.id}
+                  slot={slot}
+                  assignments={mealAssignments.filter(
+                    (a) => a.slotId === slot.id
+                  )}
+                  currentUserName={currentUserName}
+                  taskMetaMap={taskMetaMap}
+                />
+              ))}
+            </div>
+          </section>
+        )}
+
+        {!isExternalVolunteer && (
+          <section className="space-y-3">
+            <h2 className="text-2xl font-semibold tracking-[0.18em] uppercase text-[#5d7f3b]">
+              Todays Schedule
+            </h2>
+            <p className="text-sm text-[#7a7f54]">
+              Click any task to see its details, description, and who you are
+              assigned with.
+            </p>
+
+            <div className="flex flex-wrap gap-2 pt-1">
+              <button
+                type="button"
+                onClick={() => setActiveView("schedule")}
+                className={`rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-[0.14em] border transition ${
+                  activeView === "schedule"
+                    ? "bg-[#a0b764] text-white border-[#8fae4c]"
+                    : "bg-white text-[#5d7f3b] border-[#d0c9a4]"
+                }`}
+              >
+                Schedule
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveView("myTasks")}
+                className={`rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-[0.14em] border transition ${
+                  activeView === "myTasks"
+                    ? "bg-[#a0b764] text-white border-[#8fae4c]"
+                    : "bg-white text-[#5d7f3b] border-[#d0c9a4]"
+                }`}
+              >
+                My Tasks
+              </button>
+            </div>
+
+            <div className="mt-3 rounded-lg bg-[#a0b764] px-3 py-3">
+              <div className="rounded-md bg-[#f8f4e3]">
+                {loading && (
+                  <div className="px-4 py-6 text-sm text-center text-[#7a7f54]">
+                    Loading schedule…
+                  </div>
                 )}
-                currentUserName={currentUserName}
-                taskMetaMap={taskMetaMap}
-              />
-            ))}
-          </div>
-        </section>
-
-        {/* Grid schedule */}
-        <section className="space-y-3">
-          <h2 className="text-2xl font-semibold tracking-[0.18em] uppercase text-[#5d7f3b]">
-            Todays Schedule
-          </h2>
-          <p className="text-sm text-[#7a7f54]">
-            Click any task to see its details, description, and who you are
-            assigned with.
-          </p>
-
-          <div className="flex flex-wrap gap-2 pt-1">
-            <button
-              type="button"
-              onClick={() => setActiveView("schedule")}
-              className={`rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-[0.14em] border transition ${
-                activeView === "schedule"
-                  ? "bg-[#a0b764] text-white border-[#8fae4c]"
-                  : "bg-white text-[#5d7f3b] border-[#d0c9a4]"
-              }`}
-            >
-              Schedule
-            </button>
-            <button
-              type="button"
-              onClick={() => setActiveView("myTasks")}
-              className={`rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-[0.14em] border transition ${
-                activeView === "myTasks"
-                  ? "bg-[#a0b764] text-white border-[#8fae4c]"
-                  : "bg-white text-[#5d7f3b] border-[#d0c9a4]"
-              }`}
-            >
-              My Tasks
-            </button>
-          </div>
-
-          <div className="mt-3 rounded-lg bg-[#a0b764] px-3 py-3">
-            <div className="rounded-md bg-[#f8f4e3]">
-              {loading && (
-                <div className="px-4 py-6 text-sm text-center text-[#7a7f54]">
-                  Loading schedule…
-                </div>
-              )}
-              {error && (
-                <div className="px-4 py-6 text-sm text-center text-red-700">
-                  {error}
-                </div>
-              )}
-
-              {!loading &&
-                !error &&
-                data &&
-                standardWorkSlots.length > 0 &&
-                activeView === "schedule" && (
-                  <>
-                    <div className="relative">
-                      <div className="pointer-events-none absolute inset-y-0 left-0 right-0 z-10 flex items-center justify-between px-2 sm:hidden">
-                        <button
-                          type="button"
-                          onClick={() => scrollSchedule("left")}
-                          className="pointer-events-auto rounded-full bg-white/90 border border-[#d0c9a4] shadow px-2 py-2 text-[#4b522d] hover:-translate-x-0.5 transition"
-                          aria-label="Scroll schedule left"
-                        >
-                          ←
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => scrollSchedule("right")}
-                          className="pointer-events-auto rounded-full bg-white/90 border border-[#d0c9a4] shadow px-2 py-2 text-[#4b522d] hover:translate-x-0.5 transition"
-                          aria-label="Scroll schedule right"
-                        >
-                          →
-                        </button>
-                      </div>
-                      <div
-                        ref={scheduleScrollRef}
-                        className="overflow-x-auto scroll-smooth pb-2"
-                      >
-                        <ScheduleGrid
-                          data={data}
-                          workSlots={standardWorkSlots}
-                          currentUserName={currentUserName}
-                          currentSlotId={currentSlotId}
-                          onTaskClick={handleTaskClick}
-                          statusMap={taskMetaMap}
-                        />
-                      </div>
-                    </div>
-                  </>
-                )}
-
-              {!loading &&
-                !error &&
-                data &&
-                activeView === "myTasks" && (
-                  <div className="px-4 py-4">
-                    <MyTasksList
-                      tasks={myTasks}
-                      onTaskClick={handleTaskClick}
-                      statusMap={taskMetaMap}
-                      currentUserName={currentUserName}
-                    />
+                {error && (
+                  <div className="px-4 py-6 text-sm text-center text-red-700">
+                    {error}
                   </div>
                 )}
 
-              {!loading &&
-                !error &&
-                data &&
-                standardWorkSlots.length === 0 &&
-                activeView === "schedule" && (
-                <div className="px-4 py-6 text-sm text-center text-[#7a7f54]">
-                  No work slots defined in this schedule.
-                </div>
-              )}
+                {!loading &&
+                  !error &&
+                  data &&
+                  standardWorkSlots.length > 0 &&
+                  activeView === "schedule" && (
+                    <>
+                      <div className="relative">
+                        <div className="pointer-events-none absolute inset-y-0 left-0 right-0 z-10 flex items-center justify-between px-2 sm:hidden">
+                          <button
+                            type="button"
+                            onClick={() => scrollSchedule("left")}
+                            className="pointer-events-auto rounded-full bg-white/90 border border-[#d0c9a4] shadow px-2 py-2 text-[#4b522d] hover:-translate-x-0.5 transition"
+                            aria-label="Scroll schedule left"
+                          >
+                            ←
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => scrollSchedule("right")}
+                            className="pointer-events-auto rounded-full bg-white/90 border border-[#d0c9a4] shadow px-2 py-2 text-[#4b522d] hover:translate-x-0.5 transition"
+                            aria-label="Scroll schedule right"
+                          >
+                            →
+                          </button>
+                        </div>
+                        <div
+                          ref={scheduleScrollRef}
+                          className="overflow-x-auto scroll-smooth pb-2"
+                        >
+                          <ScheduleGrid
+                            data={data}
+                            workSlots={standardWorkSlots}
+                            currentUserName={currentUserName}
+                            currentSlotId={currentSlotId}
+                            onTaskClick={handleTaskClick}
+                            statusMap={taskMetaMap}
+                          />
+                        </div>
+                      </div>
+                    </>
+                  )}
+
+                {!loading &&
+                  !error &&
+                  data &&
+                  activeView === "myTasks" && (
+                    <div className="px-4 py-4">
+                      <MyTasksList
+                        tasks={myTasks}
+                        onTaskClick={handleTaskClick}
+                        statusMap={taskMetaMap}
+                        currentUserName={currentUserName}
+                      />
+                    </div>
+                  )}
+
+                {!loading &&
+                  !error &&
+                  data &&
+                  standardWorkSlots.length === 0 &&
+                  activeView === "schedule" && (
+                  <div className="px-4 py-6 text-sm text-center text-[#7a7f54]">
+                    No work slots defined in this schedule.
+                  </div>
+                )}
+              </div>
             </div>
-          </div>
-        </section>
+          </section>
+        )}
+
+        {isExternalVolunteer && (
+          <section className="space-y-3">
+            <div className="rounded-lg bg-[#a0b764] px-3 py-3 text-sm text-[#f8f4e3] shadow">
+              Weekend assignments available for External Volunteers are listed below.
+            </div>
+          </section>
+        )}
 
         {!loading &&
           !error &&
@@ -979,6 +996,16 @@ export default function HubSchedulePage() {
                 </div>
               </div>
             </section>
+          )}
+
+        {isExternalVolunteer &&
+          !showWeekendSection &&
+          !loading &&
+          !error &&
+          data && (
+            <p className="text-sm text-[#7a7f54]">
+              No weekend assignments are currently listed for you.
+            </p>
           )}
       </div>
 

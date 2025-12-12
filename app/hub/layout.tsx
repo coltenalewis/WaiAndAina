@@ -41,11 +41,28 @@ export default function HubLayout({ children }: { children: ReactNode }) {
     []
   );
 
+  const normalizedType = (userType || "").toLowerCase();
+  const isExternalVolunteer = normalizedType === "external volunteer";
+
   const canAccessWork = useMemo(() => {
     if (!userType) return false;
-    const normalized = userType.toLowerCase();
-    return ["admin", "volunteer", "external volunteer"].includes(normalized);
-  }, [userType]);
+    return ["admin", "volunteer", "external volunteer"].includes(normalizedType);
+  }, [normalizedType, userType]);
+
+  const workLinks = useMemo(() => {
+    const links = [
+      { href: "/hub/dashboard", label: "Dashboard", icon: "🧭" },
+      { href: "/hub", label: "Schedule", icon: "📆" },
+      { href: "/hub/request", label: "Requests", icon: "📝" },
+      { href: "/hub/goat", label: "Arcade", icon: "🐐" },
+    ];
+
+    if (isExternalVolunteer) {
+      return links.filter((link) => link.href === "/hub");
+    }
+
+    return links;
+  }, [isExternalVolunteer]);
 
   function handleLogout() {
     clearSession();
@@ -208,7 +225,7 @@ export default function HubLayout({ children }: { children: ReactNode }) {
               <HubLink href="/" active={false}>
                 Home
               </HubLink>
-              {canAccessWork && (
+              {canAccessWork && workLinks.length > 0 && (
                 <div className="relative">
                   <button
                     onClick={() => setDesktopWorkOpen((v) => !v)}
@@ -228,7 +245,7 @@ export default function HubLayout({ children }: { children: ReactNode }) {
                     }`}
                   >
                     <div className="flex flex-col divide-y divide-[#e7dfc0]">
-                      {[{ href: "/hub/dashboard", label: "Dashboard", icon: "🧭" }, { href: "/hub", label: "Schedule", icon: "📆" }, { href: "/hub/request", label: "Requests", icon: "📝" }, { href: "/hub/goat", label: "Arcade", icon: "🐐" }].map((link) => (
+                      {workLinks.map((link) => (
                         <Link
                           key={link.href}
                           href={link.href}
@@ -246,9 +263,11 @@ export default function HubLayout({ children }: { children: ReactNode }) {
                   </div>
                 </div>
               )}
-              <HubLink href="/hub/settings" active={pathname === "/hub/settings"}>
-                Settings
-              </HubLink>
+              {name && (
+                <HubLink href="/hub/settings" active={pathname === "/hub/settings"}>
+                  Settings
+                </HubLink>
+              )}
               <div className="relative">
                 <button
                   onClick={() => setDesktopGuidesOpen((v) => !v)}
@@ -353,7 +372,7 @@ export default function HubLayout({ children }: { children: ReactNode }) {
                   Home
                 </MobileLink>
 
-                {canAccessWork && (
+                {canAccessWork && workLinks.length > 0 && (
                   <div className="flex flex-col gap-2">
                     <button
                       onClick={() => setMobileWorkOpen((v) => !v)}
@@ -374,7 +393,7 @@ export default function HubLayout({ children }: { children: ReactNode }) {
                     >
                       <div className="mt-1 ml-2 rounded-lg border border-[#e7dfc0] bg-white shadow-inner max-h-56 overflow-y-auto">
                         <div className="flex flex-col divide-y divide-[#f0ead4]">
-                          {[{ href: "/hub/dashboard", label: "Dashboard", icon: "🧭" }, { href: "/hub", label: "Schedule", icon: "📆" }, { href: "/hub/request", label: "Requests", icon: "📝" }, { href: "/hub/goat", label: "Arcade", icon: "🐐" }].map((link) => (
+                          {workLinks.map((link) => (
                             <Link
                               key={link.href}
                               href={link.href}
@@ -394,9 +413,11 @@ export default function HubLayout({ children }: { children: ReactNode }) {
                   </div>
                 )}
 
-                <MobileLink href="/hub/settings" active={pathname === "/hub/settings"}>
-                  Settings
-                </MobileLink>
+                {name && (
+                  <MobileLink href="/hub/settings" active={pathname === "/hub/settings"}>
+                    Settings
+                  </MobileLink>
+                )}
 
                 <button
                   onClick={() => setMobileGuidesOpen((v) => !v)}
@@ -473,10 +494,10 @@ export default function HubLayout({ children }: { children: ReactNode }) {
         </div>
       )}
 
-      {canAccessWork && (
+      {canAccessWork && workLinks.length > 0 && (
         <div className="bg-[#f7f4e6] border-b border-[#d0c9a4]">
           <div className="max-w-6xl mx-auto px-3 sm:px-4 py-2 flex flex-wrap gap-2">
-            {[{ href: "/hub/dashboard", label: "Dashboard" }, { href: "/hub", label: "Schedule" }, { href: "/hub/request", label: "Request" }, { href: "/hub/goat", label: "Arcade" }].map((link) => (
+            {workLinks.map((link) => (
               <WorkNavLink key={link.href} href={link.href} active={pathname === link.href}>
                 {link.label}
               </WorkNavLink>
