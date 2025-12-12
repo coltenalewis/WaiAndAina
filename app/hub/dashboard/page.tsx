@@ -16,6 +16,7 @@ type ScheduleResponse = {
   people: string[];
   slots: Slot[];
   cells: string[][];
+  scheduleDate?: string;
 };
 
 type MiniTask = {

@@ -4,6 +4,7 @@ import {
   queryAllDatabasePages,
   queryDatabase,
   retrieveDatabase,
+  listAllBlockChildren,
 } from "@/lib/notion";
 
 const SCHEDULE_DB_ID = process.env.NOTION_SCHEDULE_DATABASE_ID!;
@@ -22,6 +23,7 @@ type ScheduleResponse = {
   people: string[];
   slots: Slot[];
   cells: string[][]; // [row][col] = task
+  scheduleDate?: string;
 };
 
 // Safe way to pull text out of different Notion property types
@@ -64,6 +66,84 @@ function parseSlotMeta(key: string) {
   return { label, timeRange, isMeal, order };
 }
 
+function notionTitleToPlainText(title: any[] = []) {
+  return title.map((t) => t.plain_text || "").join("").trim();
+}
+
+function getTitlePropertyKey(meta: any): string {
+  const props = meta?.properties || {};
+  for (const [key, value] of Object.entries(props)) {
+    if ((value as any)?.type === "title") return key;
+  }
+  return "Name";
+}
+
+function formatScheduleDate(dateStr: string): string {
+  const dt = new Date(dateStr);
+  if (Number.isNaN(dt.getTime())) return dateStr;
+  const month = `${dt.getMonth() + 1}`.padStart(2, "0");
+  const day = `${dt.getDate()}`.padStart(2, "0");
+  const year = dt.getFullYear();
+  return `${month}/${day}/${year}`;
+}
+
+async function resolveScheduleDatabase() {
+  // First, attempt to treat the ID as a database (legacy behavior)
+  try {
+    const meta = await retrieveDatabase(SCHEDULE_DB_ID);
+    return { databaseId: SCHEDULE_DB_ID, databaseMeta: meta };
+  } catch (err) {
+    console.warn("Schedule ID is not a database, attempting to read page children");
+  }
+
+  // Otherwise, treat the ID as the main page that contains child databases
+  const children = await listAllBlockChildren(SCHEDULE_DB_ID);
+  const childDatabases = (children.results || []).filter(
+    (block: any) => block.type === "child_database"
+  );
+
+  const settingsDb = childDatabases.find(
+    (db: any) =>
+      (db.child_database?.title || "").trim().toLowerCase() === "settings"
+  );
+
+  if (!settingsDb) {
+    throw new Error("Could not find Settings database under the schedule page");
+  }
+
+  const settingsMeta = await retrieveDatabase(settingsDb.id);
+  const titleKey = getTitlePropertyKey(settingsMeta);
+  const settingsQuery = await queryDatabase(settingsDb.id, {
+    page_size: 1,
+    filter: {
+      property: titleKey,
+      title: {
+        equals: "Settings",
+      },
+    },
+  });
+
+  const settingsRow = settingsQuery.results?.[0];
+  const selectedDate = settingsRow?.properties?.["Selected Schedule"]?.date?.start;
+
+  if (!selectedDate) {
+    throw new Error("Selected Schedule date is not configured in Notion");
+  }
+
+  const formattedDate = formatScheduleDate(selectedDate);
+
+  const targetDb = childDatabases.find(
+    (db: any) => (db.child_database?.title || "").trim() === formattedDate
+  );
+
+  if (!targetDb) {
+    throw new Error(`No schedule database found for ${formattedDate}`);
+  }
+
+  const databaseMeta = await retrieveDatabase(targetDb.id);
+  return { databaseId: targetDb.id, databaseMeta, scheduleDate: formattedDate };
+}
+
 export async function GET() {
   if (!SCHEDULE_DB_ID) {
     return NextResponse.json(
@@ -73,24 +153,38 @@ export async function GET() {
   }
 
   try {
-    const data = await queryAllDatabasePages(SCHEDULE_DB_ID);
+    const resolution = await resolveScheduleDatabase();
+    const data = await queryAllDatabasePages(resolution.databaseId);
     const pages = data.results || [];
 
     if (pages.length === 0) {
-      const empty: ScheduleResponse = { people: [], slots: [], cells: [] };
+      const empty: ScheduleResponse = {
+        people: [],
+        slots: [],
+        cells: [],
+        scheduleDate: resolution.scheduleDate,
+      };
       return NextResponse.json(empty);
     }
 
     let slotKeys: string[] = [];
 
     try {
-      const dbMeta = await retrieveDatabase(SCHEDULE_DB_ID);
+      const dbMeta =
+        resolution.databaseMeta || (await retrieveDatabase(resolution.databaseId));
       const metaProps = dbMeta?.properties || {};
       slotKeys = Object.keys(metaProps).filter(
         (key) => key !== PERSON_PROPERTY_KEY
       );
+      // If no explicit date was provided, surface the database title as a hint
+      if (!resolution.scheduleDate && dbMeta?.title) {
+        resolution.scheduleDate = notionTitleToPlainText(dbMeta.title);
+      }
     } catch (metaErr) {
-      console.error("Failed to retrieve database metadata, falling back to first row:", metaErr);
+      console.error(
+        "Failed to retrieve database metadata, falling back to first row:",
+        metaErr
+      );
       const firstProps = pages[0].properties || {};
       slotKeys = Object.keys(firstProps).filter(
         (key) => key !== PERSON_PROPERTY_KEY
@@ -140,7 +234,12 @@ export async function GET() {
       cells.push(rowTasks);
     }
 
-    const response: ScheduleResponse = { people, slots, cells };
+    const response: ScheduleResponse = {
+      people,
+      slots,
+      cells,
+      scheduleDate: resolution.scheduleDate,
+    };
     return NextResponse.json(response);
   } catch (err) {
     console.error("Failed to fetch schedule from Notion:", err);

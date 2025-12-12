@@ -15,6 +15,7 @@ type ScheduleResponse = {
   people: string[];
   slots: Slot[];
   cells: string[][];
+  scheduleDate?: string;
 };
 
 type MealAssignment = {
@@ -647,6 +648,19 @@ export default function HubSchedulePage() {
   return (
     <>
       <div className="space-y-8">
+        <div className="rounded-lg border border-[#d0c9a4] bg-white/80 px-4 py-3 shadow-sm">
+          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[#5d7f3b]">
+            Schedule date
+          </p>
+          <p className="text-sm text-[#4b5133]">
+            {loading
+              ? "Loading schedule…"
+              : data?.scheduleDate
+              ? `Showing schedule for ${data.scheduleDate}`
+              : "No schedule date is configured in Notion yet."}
+          </p>
+        </div>
+
         {!isExternalVolunteer && taskTypes.length > 0 && (
           <section className="rounded-lg border border-[#d0c9a4] bg-white/80 px-4 py-3 shadow-sm">
             <div className="flex items-center justify-between gap-3">
