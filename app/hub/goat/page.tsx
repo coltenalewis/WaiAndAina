@@ -688,6 +688,7 @@ export default function GoatArcadePage() {
       const columns = PLINKO_BUCKETS.length;
       const path = buildPlinkoPath(targetIndex, columns);
       setPlinkoPath(path);
+      const steps = path.length;
 
       let step = 0;
       pathInterval = setInterval(() => {
