@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import {
   createComment,
+  queryAllDatabasePages,
   queryDatabase,
   retrieveComments,
   updatePage,
@@ -117,7 +118,40 @@ export async function GET(req: Request) {
   }
 
   const { searchParams } = new URL(req.url);
+  const listOnly = searchParams.get("list");
   const name = searchParams.get("name");
+
+  if (listOnly) {
+    try {
+      const data = await queryAllDatabasePages(TASKS_DB_ID, {
+        sorts: [{ property: TASK_NAME_PROPERTY_KEY, direction: "ascending" }],
+      });
+
+      const tasks = (data.results || []).map((page: any) => {
+        const props = page.properties || {};
+        const nameProp = getPlainText(props[TASK_NAME_PROPERTY_KEY]);
+        const typeProp = props[TASK_TYPE_PROPERTY_KEY];
+        const statusProp = props[TASK_STATUS_PROPERTY_KEY];
+
+        return {
+          id: page.id,
+          name: nameProp,
+          type: typeProp?.select?.name || "",
+          typeColor: typeProp?.select?.color || "default",
+          status: statusProp?.select?.name || "",
+        };
+      });
+
+      return NextResponse.json({ tasks });
+    } catch (err) {
+      console.error("Failed to list tasks:", err);
+      return NextResponse.json(
+        { error: "Unable to load tasks" },
+        { status: 500 }
+      );
+    }
+  }
+
   if (!name) {
     return NextResponse.json(
       { error: "Missing task name" },
