@@ -267,16 +267,16 @@ export default function HubSchedulePage() {
     }
   }
 
-  function renderTextWithAnimalLinks(text: string) {
+  function renderTextWithAnimalLinks(text: string): React.ReactNode {
     if (!text) return "";
-    const parts: (string | JSX.Element)[] = [];
+    const parts: React.ReactNode[] = [];
     const regex = /\[animal:([^\]]+)\]/gi;
     let lastIndex = 0;
     let match: RegExpExecArray | null;
 
     const renderPlain = (plain: string) => {
       return plain.split("\n").flatMap((segment, idx) => {
-        const nodes: JSX.Element[] = [];
+        const nodes: React.ReactNode[] = [];
         if (idx > 0) {
           nodes.push(<br key={`br-${lastIndex}-${idx}`} />);
         }
