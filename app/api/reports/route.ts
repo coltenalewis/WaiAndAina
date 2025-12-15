@@ -413,7 +413,8 @@ export async function GET(req: Request) {
       }
 
       const children = await listAllBlockChildren(REPORTS_DB_ID);
-      const items = (children.results || [])
+      type ReportListItem = { id: string; title: string; date?: string };
+      const items: ReportListItem[] = (children.results || [])
         .filter((block: any) => block.type === "child_page")
         .map((block: any) => ({
           id: block.id,
@@ -421,7 +422,9 @@ export async function GET(req: Request) {
           date: block.created_time,
         }));
 
-      items.sort((a, b) => (b.date || "").localeCompare(a.date || ""));
+      items.sort((a: ReportListItem, b: ReportListItem) =>
+        (b.date || "").localeCompare(a.date || "")
+      );
       return NextResponse.json({ reports: items });
     } catch (err) {
       console.error("Failed to list reports:", err);
