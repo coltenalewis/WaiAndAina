@@ -62,12 +62,29 @@ function getPlainText(prop: any): string {
 function parseLinks(prop: any): { label: string; url: string }[] {
   if (!prop) return [];
 
+  const parsePlainEntry = (entry: string) => {
+    const trimmed = entry.trim();
+    if (!trimmed) return null;
+
+    const bracketMatch = trimmed.match(/^\[([^\]]+)\]\s*(.+)$/);
+    if (bracketMatch) {
+      const [, label, url] = bracketMatch;
+      return { label: label.trim(), url: url.trim() };
+    }
+
+    return { label: trimmed, url: trimmed };
+  };
+
   if (prop.type === "rich_text" && Array.isArray(prop.rich_text)) {
     return prop.rich_text
       .map((t: any) => {
         const content = t?.plain_text?.trim();
         const url = t?.href || t?.text?.link?.url || "";
         if (!content && !url) return null;
+
+        const bracketParsed = content ? parsePlainEntry(content) : null;
+        if (bracketParsed && !url) return bracketParsed;
+
         return { label: content || url, url: url || content };
       })
       .filter(Boolean) as { label: string; url: string }[];
@@ -81,10 +98,9 @@ function parseLinks(prop: any): { label: string; url: string }[] {
   if (!plain) return [];
 
   return plain
-    .split(",")
-    .map((entry) => entry.trim())
-    .filter(Boolean)
-    .map((entry) => ({ label: entry, url: entry }));
+    .split(/,|\n/)
+    .map((entry) => parsePlainEntry(entry))
+    .filter(Boolean) as { label: string; url: string }[];
 }
 
 async function findTaskPageByName(name: string) {
@@ -252,11 +268,11 @@ export async function PATCH(req: Request) {
   }
 
   const body = await req.json().catch(() => null);
-  const { name, status } = body || {};
+  const { name, status, description, taskType } = body || {};
 
-  if (!name || !status) {
+  if (!name || (!status && !description && taskType === undefined)) {
     return NextResponse.json(
-      { error: "Missing task name or status" },
+      { error: "No updates provided for this task" },
       { status: 400 }
     );
   }
@@ -270,17 +286,38 @@ export async function PATCH(req: Request) {
       );
     }
 
-    const properties: Record<string, any> = {
-      [TASK_STATUS_PROPERTY_KEY]: { select: { name: status } },
-    };
+    const properties: Record<string, any> = {};
+
+    if (status !== undefined) {
+      properties[TASK_STATUS_PROPERTY_KEY] = { select: { name: status } };
+    }
+
+    if (description !== undefined) {
+      properties[TASK_DESC_PROPERTY_KEY] = {
+        rich_text: description
+          ? [
+              {
+                type: "text",
+                text: { content: description },
+              },
+            ]
+          : [],
+      };
+    }
+
+    if (taskType !== undefined) {
+      properties[TASK_TYPE_PROPERTY_KEY] = taskType
+        ? { select: { name: taskType } }
+        : { select: null };
+    }
 
     await updatePage(page.id, properties);
 
-    return NextResponse.json({ success: true, status });
+    return NextResponse.json({ success: true });
   } catch (err) {
-    console.error("Failed to update task status:", err);
+    console.error("Failed to update task:", err);
     return NextResponse.json(
-      { error: "Failed to update status" },
+      { error: "Failed to update task" },
       { status: 500 }
     );
   }

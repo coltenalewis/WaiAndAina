@@ -18,6 +18,25 @@ const TASK_STATUS_PROPERTY_KEY = "Status";
 const TASK_DESC_PROPERTY_KEY = "Description";
 const TASK_NOTES_PROPERTY_KEY = "Extra Notes";
 
+type RichTextNode = { plain: string; href?: string; annotations?: any };
+type ReportBlock = {
+  id: string;
+  type: string;
+  richText?: RichTextNode[];
+  checked?: boolean;
+  url?: string;
+  caption?: RichTextNode[];
+  children?: ReportBlock[];
+};
+
+function mapRichText(richText: any[] = []): RichTextNode[] {
+  return richText.map((t: any) => ({
+    plain: t.plain_text || "",
+    href: t.href || undefined,
+    annotations: t.annotations || {},
+  }));
+}
+
 function getPlainText(prop: any): string {
   if (!prop) return "";
 
@@ -60,6 +79,83 @@ function getDatePropertyKey(meta: any): string | null {
     if ((value as any)?.type === "date") return key;
   }
   return null;
+}
+
+async function buildBlocks(blockId: string): Promise<ReportBlock[]> {
+  const data = await listAllBlockChildren(blockId);
+
+  const blocks = await Promise.all(
+    (data.results || []).map(async (block: any) => {
+      let children: ReportBlock[] = [];
+      if (block.has_children) {
+        children = await buildBlocks(block.id);
+      }
+
+      switch (block.type) {
+        case "heading_1":
+        case "heading_2":
+        case "heading_3":
+        case "paragraph":
+        case "quote":
+        case "callout":
+          return {
+            id: block.id,
+            type: block.type,
+            richText: mapRichText(block[block.type]?.rich_text),
+            children,
+          } as ReportBlock;
+        case "bulleted_list_item":
+        case "numbered_list_item":
+          return {
+            id: block.id,
+            type: block.type,
+            richText: mapRichText(block[block.type]?.rich_text),
+            children,
+          } as ReportBlock;
+        case "to_do":
+          return {
+            id: block.id,
+            type: "to_do",
+            richText: mapRichText(block.to_do?.rich_text),
+            checked: !!block.to_do?.checked,
+            children,
+          } as ReportBlock;
+        case "bookmark":
+          return {
+            id: block.id,
+            type: "bookmark",
+            url: block.bookmark?.url,
+            caption: mapRichText(block.bookmark?.caption),
+            children,
+          } as ReportBlock;
+        case "image": {
+          const image = block.image;
+          const url =
+            image?.type === "external" ? image.external?.url : image?.file?.url;
+          return {
+            id: block.id,
+            type: "image",
+            url,
+            caption: mapRichText(image?.caption),
+            children,
+          } as ReportBlock;
+        }
+        case "divider":
+          return { id: block.id, type: "divider" } as ReportBlock;
+        case "child_page":
+          return null;
+        default:
+          return {
+            id: block.id,
+            type: "unsupported",
+            richText: mapRichText(block[block.type]?.rich_text || []),
+            children,
+          } as ReportBlock;
+      }
+    })
+  );
+
+  return blocks.filter(Boolean) as ReportBlock[];
 }
 
 function baseTaskName(task: string) {
@@ -387,6 +483,37 @@ export async function GET(req: Request) {
 
   const { searchParams } = new URL(req.url);
   const listOnly = searchParams.get("list");
+  const reportId = searchParams.get("id");
+
+  if (reportId) {
+    try {
+      const page = await retrievePage(reportId);
+      if (!page || (page as any).object === "error") {
+        return NextResponse.json({ error: "Report not found" }, { status: 404 });
+      }
+
+      const blocks = await buildBlocks(reportId);
+      const title =
+        page.properties?.Name?.title?.[0]?.plain_text ||
+        page.properties?.title?.title?.[0]?.plain_text ||
+        "Daily Report";
+
+      return NextResponse.json({
+        report: {
+          id: reportId,
+          title,
+          date: page.created_time,
+        },
+        blocks,
+      });
+    } catch (err) {
+      console.error("Failed to load report detail", err);
+      return NextResponse.json(
+        { error: "Unable to load report" },
+        { status: 500 }
+      );
+    }
+  }
 
   if (listOnly) {
     try {
