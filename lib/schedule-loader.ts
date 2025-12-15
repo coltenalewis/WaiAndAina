@@ -20,6 +20,7 @@ export type ScheduleData = {
   slots: Slot[];
   cells: string[][];
   scheduleDate?: string;
+  reportTime?: string;
   message?: string;
 };
 
@@ -82,7 +83,7 @@ function formatScheduleDate(dateStr: string): string {
   return `${month}/${day}/${year}`;
 }
 
-async function resolveScheduleDatabase() {
+export async function resolveScheduleDatabase() {
   try {
     const meta = await retrieveDatabase(SCHEDULE_DB_ID);
     return { databaseId: SCHEDULE_DB_ID, databaseMeta: meta };
@@ -106,18 +107,33 @@ async function resolveScheduleDatabase() {
 
   const settingsMeta = await retrieveDatabase(settingsDb.id);
   const titleKey = getTitlePropertyKey(settingsMeta);
-  const settingsQuery = await queryDatabase(settingsDb.id, {
-    page_size: 1,
-    filter: {
-      property: titleKey,
-      title: {
-        equals: "Settings",
+  const [settingsQuery, reportQuery] = await Promise.all([
+    queryDatabase(settingsDb.id, {
+      page_size: 1,
+      filter: {
+        property: titleKey,
+        title: {
+          equals: "Settings",
+        },
       },
-    },
-  });
+    }),
+    queryDatabase(settingsDb.id, {
+      page_size: 1,
+      filter: {
+        property: titleKey,
+        title: {
+          equals: "Report Time",
+        },
+      },
+    }),
+  ]);
 
   const settingsRow = settingsQuery.results?.[0];
   const selectedDate = settingsRow?.properties?.["Selected Schedule"]?.date?.start;
+
+  const reportRow = reportQuery.results?.[0];
+  const reportTimeValue =
+    reportRow?.properties?.["Auto update"]?.date?.start || "";
 
   if (!selectedDate) {
     throw new Error("Selected Schedule date is not configured in Notion");
@@ -134,7 +150,12 @@ async function resolveScheduleDatabase() {
   }
 
   const databaseMeta = await retrieveDatabase(targetDb.id);
-  return { databaseId: targetDb.id, databaseMeta, scheduleDate: formattedDate };
+  return {
+    databaseId: targetDb.id,
+    databaseMeta,
+    scheduleDate: formattedDate,
+    reportTime: reportTimeValue,
+  };
 }
 
 export async function loadScheduleData(): Promise<ScheduleData> {
@@ -223,6 +244,7 @@ export async function loadScheduleData(): Promise<ScheduleData> {
       slots,
       cells,
       scheduleDate: resolution.scheduleDate,
+      reportTime: resolution.reportTime,
     };
   } catch (err) {
     const friendly = "No schedule has been assigned yet.";

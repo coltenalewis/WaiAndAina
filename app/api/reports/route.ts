@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import {
   createPageInDatabase,
   createPageUnderPage,
+  listAllBlockChildren,
   queryDatabase,
   retrieveComments,
   retrieveDatabase,
@@ -63,6 +64,18 @@ function getDatePropertyKey(meta: any): string | null {
 
 function baseTaskName(task: string) {
   return (task || "").split("\n")[0].trim();
+}
+
+function formatHawaiiTime(dateInput?: string) {
+  if (!dateInput) return "";
+  const dt = new Date(dateInput);
+  if (Number.isNaN(dt.getTime())) return "";
+  return dt.toLocaleTimeString("en-US", {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+    timeZone: "Pacific/Honolulu",
+  });
 }
 
 function toIso(dateLabel?: string) {
@@ -210,31 +223,47 @@ function bullet(content: string, children: any[] = []) {
   };
 }
 
-export async function POST() {
-  if (!REPORTS_DB_ID || !TASKS_DB_ID) {
-    return NextResponse.json(
-      { error: "Reports or Tasks database ID is not configured" },
-      { status: 500 }
-    );
-  }
+async function resolveReportsParent() {
+  let meta: any | null = null;
+  let isDatabase = true;
+  let titleKey = "Name";
+  let dateKey: string | null = null;
 
-  let schedule;
   try {
-    schedule = await loadScheduleData();
+    meta = await retrieveDatabase(REPORTS_DB_ID);
+    titleKey = getTitlePropertyKey(meta);
+    dateKey = getDatePropertyKey(meta);
   } catch (err) {
-    console.error("Failed to load schedule for report:", err);
-    return NextResponse.json(
-      { error: "Unable to load schedule for reporting" },
-      { status: 500 }
-    );
-  }
-  if (!schedule.people.length || !schedule.slots.length) {
-    return NextResponse.json(
-      { error: "No schedule has been assigned yet" },
-      { status: 400 }
-    );
+    isDatabase = false;
+    await retrievePage(REPORTS_DB_ID);
   }
 
+  return { isDatabase, meta, titleKey, dateKey };
+}
+
+async function reportExists(
+  scheduleLabel: string,
+  parentInfo: Awaited<ReturnType<typeof resolveReportsParent>>
+) {
+  const title = `Daily Report — ${scheduleLabel}`;
+  if (parentInfo.isDatabase) {
+    const results = await queryDatabase(REPORTS_DB_ID, {
+      page_size: 1,
+      filter: {
+        property: parentInfo.titleKey,
+        title: { equals: title },
+      },
+    });
+    return Boolean(results.results?.length);
+  }
+
+  const children = await listAllBlockChildren(REPORTS_DB_ID);
+  return (children.results || []).some(
+    (block: any) => block.type === "child_page" && block.child_page?.title === title
+  );
+}
+
+async function createReportFromSchedule(schedule: any) {
   const assignments = buildAssignments(
     schedule.people,
     schedule.slots,
@@ -256,31 +285,7 @@ export async function POST() {
     }
   }
 
-  let guideMeta: any | null = null;
-  let isDatabase = true;
-  let titleKey = "Name";
-  let dateKey: string | null = null;
-
-  try {
-    guideMeta = await retrieveDatabase(REPORTS_DB_ID);
-    titleKey = getTitlePropertyKey(guideMeta);
-    dateKey = getDatePropertyKey(guideMeta);
-  } catch (err) {
-    console.warn(
-      "Reports parent is not a database, falling back to child page creation:",
-      err
-    );
-    isDatabase = false;
-    try {
-      await retrievePage(REPORTS_DB_ID);
-    } catch (pageErr) {
-      console.error("Reports parent page lookup failed:", pageErr);
-      return NextResponse.json(
-        { error: "Reports parent page is not accessible" },
-        { status: 500 }
-      );
-    }
-  }
+  const parentInfo = await resolveReportsParent();
   const scheduleLabel = schedule.scheduleDate || new Date().toLocaleDateString();
   const isoDate = toIso(schedule.scheduleDate);
 
@@ -294,7 +299,7 @@ export async function POST() {
   if (assignments.length === 0) {
     children.push(paragraph("No assignments were recorded for this schedule."));
   } else {
-    schedule.slots.forEach((slot) => {
+    schedule.slots.forEach((slot: Slot) => {
       const slotAssignments = assignments.filter((a) => a.slot.id === slot.id);
       if (!slotAssignments.length) return;
 
@@ -339,9 +344,9 @@ export async function POST() {
     });
   }
 
-  const properties: any = isDatabase
+  const properties: any = parentInfo.isDatabase
     ? {
-        [titleKey]: {
+        [parentInfo.titleKey]: {
           title: [
             {
               type: "text",
@@ -359,15 +364,157 @@ export async function POST() {
         ],
       };
 
-  if (isDatabase && dateKey) {
-    properties[dateKey] = {
+  if (parentInfo.isDatabase && parentInfo.dateKey) {
+    properties[parentInfo.dateKey] = {
       date: { start: isoDate },
     };
   }
 
-  const page = isDatabase
+  const page = parentInfo.isDatabase
     ? await createPageInDatabase(REPORTS_DB_ID, properties, children)
     : await createPageUnderPage(REPORTS_DB_ID, properties, children);
 
-  return NextResponse.json({ success: true, pageId: page.id });
+  return page;
+}
+
+export async function GET(req: Request) {
+  if (!REPORTS_DB_ID || !TASKS_DB_ID) {
+    return NextResponse.json(
+      { error: "Reports or Tasks database ID is not configured" },
+      { status: 500 }
+    );
+  }
+
+  const { searchParams } = new URL(req.url);
+  const listOnly = searchParams.get("list");
+
+  if (listOnly) {
+    try {
+      const parentInfo = await resolveReportsParent();
+      if (parentInfo.isDatabase) {
+        const results = await queryDatabase(REPORTS_DB_ID, {
+          sorts: [
+            {
+              property: parentInfo.dateKey || parentInfo.titleKey,
+              direction: "descending",
+            },
+          ],
+        });
+        const rows = (results.results || []).map((page: any) => ({
+          id: page.id,
+          title: getPlainText(page.properties?.[parentInfo.titleKey]) ||
+            page.properties?.[parentInfo.titleKey]?.title?.[0]?.plain_text ||
+            "Untitled report",
+          date:
+            page.properties?.[parentInfo.dateKey || ""]?.date?.start ||
+            page.created_time,
+        }));
+        return NextResponse.json({ reports: rows });
+      }
+
+      const children = await listAllBlockChildren(REPORTS_DB_ID);
+      const items = (children.results || [])
+        .filter((block: any) => block.type === "child_page")
+        .map((block: any) => ({
+          id: block.id,
+          title: block.child_page?.title || "Untitled report",
+          date: block.created_time,
+        }));
+
+      items.sort((a, b) => (b.date || "").localeCompare(a.date || ""));
+      return NextResponse.json({ reports: items });
+    } catch (err) {
+      console.error("Failed to list reports:", err);
+      return NextResponse.json(
+        { error: "Could not load reports" },
+        { status: 500 }
+      );
+    }
+  }
+
+  let schedule;
+  try {
+    schedule = await loadScheduleData();
+  } catch (err) {
+    console.error("Failed to load schedule for report:", err);
+    return NextResponse.json(
+      { error: "Unable to load schedule for reporting" },
+      { status: 500 }
+    );
+  }
+  if (!schedule.people.length || !schedule.slots.length) {
+    return NextResponse.json({ status: "no-schedule" });
+  }
+
+  const parentInfo = await resolveReportsParent();
+  const scheduleLabel = schedule.scheduleDate || new Date().toLocaleDateString();
+
+  const reportAlready = await reportExists(scheduleLabel, parentInfo);
+  if (reportAlready) {
+    return NextResponse.json({ status: "exists" });
+  }
+
+  const scheduleHSTTime = formatHawaiiTime(schedule.reportTime);
+  if (!scheduleHSTTime) {
+    return NextResponse.json({ status: "no-auto-time" });
+  }
+
+  const nowHST = new Date().toLocaleTimeString("en-US", {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+    timeZone: "Pacific/Honolulu",
+  });
+
+  if (nowHST < scheduleHSTTime) {
+    return NextResponse.json({ status: "pending", nextRun: scheduleHSTTime });
+  }
+
+  try {
+    const page = await createReportFromSchedule(schedule);
+    return NextResponse.json({ status: "created", pageId: page.id });
+  } catch (err) {
+    console.error("Auto report creation failed:", err);
+    return NextResponse.json(
+      { status: "error", error: "Failed to create report" },
+      { status: 500 }
+    );
+  }
+}
+
+export async function POST() {
+  if (!REPORTS_DB_ID || !TASKS_DB_ID) {
+    return NextResponse.json(
+      { error: "Reports or Tasks database ID is not configured" },
+      { status: 500 }
+    );
+  }
+
+  let schedule;
+  try {
+    schedule = await loadScheduleData();
+  } catch (err) {
+    console.error("Failed to load schedule for report:", err);
+    return NextResponse.json(
+      { error: "Unable to load schedule for reporting" },
+      { status: 500 }
+    );
+  }
+  if (!schedule.people.length || !schedule.slots.length) {
+    return NextResponse.json(
+      { error: "No schedule has been assigned yet" },
+      { status: 400 }
+    );
+  }
+
+  try {
+    const page = await createReportFromSchedule(schedule);
+    return NextResponse.json({ success: true, pageId: page.id });
+  } catch (err) {
+    console.error("Failed to create report manually:", err);
+    return NextResponse.json(
+      { error: "Failed to create report" },
+      { status: 500 }
+    );
+  }
 }

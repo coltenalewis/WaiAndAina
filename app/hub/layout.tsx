@@ -47,6 +47,12 @@ export default function HubLayout({ children }: { children: ReactNode }) {
     setUserTypeColor(session.userTypeColor ?? null);
   }, [router]);
 
+  useEffect(() => {
+    if (isInactiveVolunteer && pathname.startsWith("/hub") && pathname !== "/hub/goat") {
+      router.replace("/hub/goat");
+    }
+  }, [isInactiveVolunteer, pathname, router]);
+
   function isActive(path: string) {
     return pathname === path;
   }
@@ -62,11 +68,17 @@ export default function HubLayout({ children }: { children: ReactNode }) {
 
   const normalizedType = (userType || "").toLowerCase();
   const isExternalVolunteer = normalizedType === "external volunteer";
+  const isInactiveVolunteer = normalizedType === "inactive volunteer";
   const isAdmin = normalizedType === "admin";
 
   const canAccessWork = useMemo(() => {
     if (!userType) return false;
-    return ["admin", "volunteer", "external volunteer"].includes(normalizedType);
+    return [
+      "admin",
+      "volunteer",
+      "external volunteer",
+      "inactive volunteer",
+    ].includes(normalizedType);
   }, [normalizedType, userType]);
 
   const workLinks = useMemo(() => {
@@ -83,6 +95,9 @@ export default function HubLayout({ children }: { children: ReactNode }) {
 
     if (isExternalVolunteer) {
       return links.filter((link) => link.href === "/hub");
+    }
+    if (isInactiveVolunteer) {
+      return links.filter((link) => link.href === "/hub/goat");
     }
 
     return links;
@@ -146,6 +161,27 @@ export default function HubLayout({ children }: { children: ReactNode }) {
       }
     };
   }, [name]);
+
+  // Auto-generate reports once the configured Hawaii-time clock hits
+  useEffect(() => {
+    if (!isAdmin) return undefined;
+    let cancelled = false;
+
+    const tick = async () => {
+      try {
+        await fetch("/api/reports");
+      } catch (err) {
+        if (!cancelled) console.error("Auto-report check failed", err);
+      }
+    };
+
+    tick();
+    const interval = setInterval(() => tick(), 60_000);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [isAdmin]);
 
   // Poll online roster using heartbeat timestamps
   useEffect(() => {

@@ -16,6 +16,7 @@ type ScheduleResponse = {
   slots: Slot[];
   cells: string[][];
   scheduleDate?: string;
+  reportTime?: string;
   message?: string;
 };
 
