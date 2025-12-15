@@ -60,6 +60,13 @@ type AnimalProfile = {
   photos: { name: string; url: string }[];
 };
 
+type AnimalsResponse = {
+  animals: AnimalProfile[];
+  filters?: { types: { name: string; color?: string }[]; genders: { name: string; color?: string }[] };
+  hasMore?: boolean;
+  nextCursor?: string | null;
+};
+
 type TaskDetails = {
   name: string;
   description: string;
@@ -199,6 +206,19 @@ export default function HubSchedulePage() {
   const [animalLookupError, setAnimalLookupError] = useState<string | null>(null);
   const animalFetchInFlight = useRef(false);
 
+  useEffect(() => {
+    if (!animalOverlay) return undefined;
+
+    const handleKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setAnimalOverlay(null);
+      }
+    };
+
+    window.addEventListener("keydown", handleKey);
+    return () => window.removeEventListener("keydown", handleKey);
+  }, [animalOverlay]);
+
   const statusColorLookup = useMemo(() => {
     const map: Record<string, string> = {};
     statusOptions.forEach((opt) => {
@@ -238,10 +258,23 @@ export default function HubSchedulePage() {
     setAnimalLoading(true);
     setAnimalLookupError(null);
     try {
-      const res = await fetch("/api/animals");
-      if (!res.ok) throw new Error("Failed to load animals");
-      const json = await res.json();
-      setAnimals(json.animals || []);
+      const allAnimals: AnimalProfile[] = [];
+      let cursor: string | null = null;
+      let hasMore = true;
+      let page = 0;
+
+      while (hasMore && page < 20) {
+        const qs = cursor ? `?cursor=${encodeURIComponent(cursor)}` : "";
+        const res = await fetch(`/api/animals${qs}`);
+        if (!res.ok) throw new Error("Failed to load animals");
+        const json: AnimalsResponse = await res.json();
+        allAnimals.push(...(json.animals || []));
+        hasMore = Boolean(json.hasMore && json.nextCursor);
+        cursor = json.nextCursor || null;
+        page += 1;
+      }
+
+      setAnimals(allAnimals);
       setAnimalsLoaded(true);
     } catch (err) {
       console.error("Failed to load animals", err);
@@ -1809,6 +1842,9 @@ export default function HubSchedulePage() {
           <div
             className="w-full max-w-3xl overflow-hidden rounded-2xl bg-white shadow-2xl"
             onClick={(e) => e.stopPropagation()}
+            role="dialog"
+            aria-modal="true"
+            aria-label="Animal details"
           >
             <div className="grid gap-0 md:grid-cols-[1.1fr_1fr]">
               <div className="relative min-h-[240px] bg-[#f7f3e2]">
@@ -1834,10 +1870,19 @@ export default function HubSchedulePage() {
               </div>
 
               <div className="space-y-3 bg-white px-5 py-4 text-sm text-[#4b5133]">
-                <div>
-                  <p className="text-xs uppercase tracking-[0.16em] text-[#7a7f54]">Animal spotlight</p>
-                  <h3 className="text-2xl font-semibold text-[#314123]">{animalOverlay.name}</h3>
-                  <p className="text-sm text-[#5f5a3b]">{animalOverlay.summary || "No summary yet."}</p>
+                <div className="flex items-start justify-between gap-3 md:block">
+                  <div>
+                    <p className="text-xs uppercase tracking-[0.16em] text-[#7a7f54]">Animal spotlight</p>
+                    <h3 className="text-2xl font-semibold text-[#314123]">{animalOverlay.name}</h3>
+                    <p className="text-sm text-[#5f5a3b]">{animalOverlay.summary || "No summary yet."}</p>
+                  </div>
+                  <button
+                    className="rounded-full border border-[#d0c9a4] bg-white px-3 py-1 text-xs font-semibold text-[#5a5436] shadow-sm md:hidden"
+                    onClick={() => setAnimalOverlay(null)}
+                    type="button"
+                  >
+                    Close
+                  </button>
                 </div>
 
                 <div className="space-y-2">
@@ -1893,6 +1938,15 @@ export default function HubSchedulePage() {
                   </div>
                 ) : null}
               </div>
+            </div>
+            <div className="flex items-center justify-end gap-3 border-t border-[#e6dfbe] bg-white px-4 py-3 md:hidden">
+              <button
+                type="button"
+                onClick={() => setAnimalOverlay(null)}
+                className="w-full rounded-md border border-[#d0c9a4] bg-[#f6f2de] px-4 py-2 text-sm font-semibold text-[#4b5133] shadow-sm"
+              >
+                Close details
+              </button>
             </div>
           </div>
         </div>
