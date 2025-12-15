@@ -61,7 +61,15 @@ export default function HomePage() {
           throw new Error(`HTTP ${res.status}`);
         }
         const data = await res.json();
-        setUsers(data.users || []);
+        const names = Array.isArray(data.users)
+          ? data.users
+              .map((entry: any) =>
+                typeof entry === "string" ? entry : entry?.name
+              )
+              .filter(Boolean)
+          : [];
+
+        setUsers(names);
       } catch (err) {
         console.error("Failed to load users:", err);
         setUsersError("Unable to load users. Please refresh or try again later.");
