@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { queryAllDatabasePages, retrieveDatabase } from "@/lib/notion";
+import { queryDatabase, retrieveDatabase } from "@/lib/notion";
 
 const ANIMALS_DB_ID = process.env.NOTION_ANIMALS_DATABASE_ID;
 
@@ -14,6 +14,7 @@ const BREED_KEY = "Breed";
 const GENDER_KEY = "Gender";
 const PHOTO_KEY = "Photo";
 const DAILY_CARE_NOTES_KEY = "Daily Care Notes";
+const PAGE_SIZE = 50;
 
 function formatAgeInfo(dateString?: string) {
   if (!dateString) return { label: "", months: null as number | null };
@@ -78,7 +79,7 @@ function getPlainText(prop: any): string {
   }
 }
 
-export async function GET() {
+export async function GET(request: Request) {
   if (!ANIMALS_DB_ID) {
     return NextResponse.json(
       { error: "NOTION_ANIMALS_DATABASE_ID is not set" },
@@ -87,18 +88,29 @@ export async function GET() {
   }
 
   try {
+    const { searchParams } = new URL(request.url);
+    const cursor = searchParams.get("cursor") || undefined;
+    const pageSizeParam = Number(searchParams.get("pageSize"));
+    const pageSize =
+      Number.isFinite(pageSizeParam) && pageSizeParam > 0
+        ? Math.min(pageSizeParam, 100)
+        : PAGE_SIZE;
+
     const [dbMeta, result] = await Promise.all([
-      retrieveDatabase(ANIMALS_DB_ID),
-      queryAllDatabasePages(ANIMALS_DB_ID),
+      cursor ? Promise.resolve(null) : retrieveDatabase(ANIMALS_DB_ID),
+      queryDatabase(ANIMALS_DB_ID, {
+        page_size: pageSize,
+        start_cursor: cursor,
+      }),
     ]);
 
     const typeOptions: { name: string; color?: string }[] =
-      dbMeta.properties?.[TYPE_KEY]?.select?.options?.map((opt: any) => ({
+      dbMeta?.properties?.[TYPE_KEY]?.select?.options?.map((opt: any) => ({
         name: opt.name,
         color: opt.color,
       })) || [];
     const genderOptions: { name: string; color?: string }[] =
-      dbMeta.properties?.[GENDER_KEY]?.select?.options?.map((opt: any) => ({
+      dbMeta?.properties?.[GENDER_KEY]?.select?.options?.map((opt: any) => ({
         name: opt.name,
         color: opt.color,
       })) || [];
@@ -156,10 +168,14 @@ export async function GET() {
 
     return NextResponse.json({
       animals,
-      filters: {
-        types: typeOptions,
-        genders: genderOptions,
-      },
+      filters: dbMeta
+        ? {
+            types: typeOptions,
+            genders: genderOptions,
+          }
+        : undefined,
+      hasMore: Boolean(result.has_more),
+      nextCursor: result.next_cursor ?? null,
     });
   } catch (err) {
     console.error("Failed to fetch animal data:", err);

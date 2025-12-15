@@ -24,6 +24,13 @@ type Filters = {
   genders: { name: string; color?: string }[];
 };
 
+type AnimalsResponse = {
+  animals: Animal[];
+  filters?: Filters;
+  hasMore?: boolean;
+  nextCursor?: string | null;
+};
+
 function colorClass(color?: string) {
   switch (color) {
     case "red":
@@ -131,25 +138,56 @@ export default function AnimalpediaPage() {
   const [photoIndex, setPhotoIndex] = useState(0);
 
   useEffect(() => {
+    let cancelled = false;
+
     async function loadAnimals() {
       setLoading(true);
       setError(null);
+
       try {
-        const res = await fetch("/api/animals");
-        if (!res.ok) {
-          throw new Error("Failed to fetch animals");
+        const collected: Animal[] = [];
+        let nextCursor: string | null = null;
+        let hasMore = true;
+        let page = 0;
+        let fetchedFilters: Filters | null = null;
+
+        while (hasMore && page < 20) {
+          const qs = nextCursor ? `?cursor=${encodeURIComponent(nextCursor)}` : "";
+          const res = await fetch(`/api/animals${qs}`);
+          if (!res.ok) throw new Error("Failed to fetch animals");
+
+          const data: AnimalsResponse = await res.json();
+          collected.push(...(data.animals || []));
+
+          if (!fetchedFilters && data.filters) {
+            fetchedFilters = data.filters;
+          }
+
+          hasMore = Boolean(data.hasMore && data.nextCursor);
+          nextCursor = data.nextCursor || null;
+          page += 1;
         }
-        const data = await res.json();
-        setAnimals(data.animals || []);
-        setFilters(data.filters || { types: [], genders: [] });
+
+        if (!cancelled) {
+          setAnimals(collected);
+          setFilters(fetchedFilters || { types: [], genders: [] });
+        }
       } catch (err) {
-        setError("Could not load animal info. Please try again.");
+        if (!cancelled) {
+          setError("Could not load animal info. Please try again.");
+        }
       } finally {
-        setLoading(false);
+        if (!cancelled) {
+          setLoading(false);
+        }
       }
     }
 
     loadAnimals();
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const filteredAnimals = useMemo(() => {
@@ -374,7 +412,12 @@ export default function AnimalpediaPage() {
 
       {activeAnimal ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4 py-6">
-          <div className="relative max-h-[90vh] w-full max-w-3xl overflow-hidden rounded-2xl bg-white shadow-2xl">
+          <div
+            className="relative max-h-[90vh] w-full max-w-3xl overflow-hidden rounded-2xl bg-white shadow-2xl"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Animal details"
+          >
             <button
               className="absolute right-3 top-3 rounded-full bg-black/60 px-3 py-1 text-white"
               onClick={() => setActiveAnimal(null)}
@@ -414,10 +457,18 @@ export default function AnimalpediaPage() {
               </div>
 
               <div className="space-y-4 bg-white px-5 py-4 text-sm text-[#4b5133]">
-                <div>
-                  <p className="text-xs uppercase tracking-[0.16em] text-[#7a7f54]">Animal</p>
-                  <h2 className="text-2xl font-semibold text-[#314123]">{activeAnimal.name}</h2>
-                  <p className="text-sm text-[#5f5a3b]">{activeAnimal.summary || "No summary yet."}</p>
+                <div className="flex items-start justify-between gap-3 md:block">
+                  <div>
+                    <p className="text-xs uppercase tracking-[0.16em] text-[#7a7f54]">Animal</p>
+                    <h2 className="text-2xl font-semibold text-[#314123]">{activeAnimal.name}</h2>
+                    <p className="text-sm text-[#5f5a3b]">{activeAnimal.summary || "No summary yet."}</p>
+                  </div>
+                  <button
+                    className="rounded-full border border-[#d0c9a4] bg-white px-3 py-1 text-xs font-semibold text-[#5a5436] shadow-sm md:hidden"
+                    onClick={() => setActiveAnimal(null)}
+                  >
+                    Close
+                  </button>
                 </div>
 
                 <div className="space-y-2">
@@ -467,6 +518,15 @@ export default function AnimalpediaPage() {
                   </div>
                 ) : null}
               </div>
+            </div>
+            <div className="flex items-center justify-end gap-3 border-t border-[#e6dfbe] bg-white px-4 py-3 md:hidden">
+              <button
+                type="button"
+                onClick={() => setActiveAnimal(null)}
+                className="w-full rounded-md border border-[#d0c9a4] bg-[#f6f2de] px-4 py-2 text-sm font-semibold text-[#4b5133] shadow-sm"
+              >
+                Close details
+              </button>
             </div>
           </div>
         </div>
