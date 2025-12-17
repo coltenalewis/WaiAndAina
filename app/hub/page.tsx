@@ -2551,58 +2551,67 @@ function ScheduleGrid({
                     }`}
                   >
                     <div className="flex h-full w-full flex-col gap-2">
-                      {displayTasks.map((taskText, idx) => {
-                        const primaryTitle = taskBaseName(taskText);
-                        const meta = statusMap[primaryTitle];
-                        const note = taskText
-                          .split("\n")
-                          .slice(1)
-                          .join("\n");
-                        const perHeight = Math.max(
-                          spanHeight / displayTasks.length,
-                          baseRowHeight * 0.7
-                        );
+                     {displayTasks.map((taskText, idx) => {
+  const primaryTitle = taskBaseName(taskText);
+  const meta = statusMap[primaryTitle];
 
-                        return (
-                          <button
-                            key={`${visualRow}-${slotIndex}-${primaryTitle}-${idx}`}
-                            type="button"
-                            onClick={() => {
-                              const allAssignees = getAssigneesForTask(slotIndex, taskText);
-                              onTaskClick?.({
-                                person: pickPrimaryPerson(allAssignees),
-                                slot,
-                                task: taskText,
-                                groupNames: allAssignees.length ? allAssignees : [person],
-                              });
-                            }}
-                            style={{ minHeight: `${perHeight}px` }}
-                            className={`flex h-full min-h-full w-full flex-col justify-between gap-2 text-left rounded-md border p-2 text-[11px] leading-snug shadow-sm focus:outline-none focus:ring-2 focus:ring-[#8fae4c] ${typeColorClasses(
-                              meta?.typeColor
-                            )}`}
-                          >
-                            <div className="flex justify-between items-start gap-2">
-                              <span className="font-semibold">{primaryTitle}</span>
-                              {sharedCount > 1 && (
-                                <span className="text-[9px] text-[#4f4f31] bg-white/70 rounded-full px-2 py-[1px]">
-                                  {sharedCount} people
-                                </span>
-                              )}
-                            </div>
-                            <div className="mt-1">
-                              <StatusBadge
-                                status={meta?.status}
-                                color={statusColors[meta?.status || ""]}
-                              />
-                            </div>
-                            {note && (
-                              <div className="mt-1 whitespace-pre-line opacity-90">
-                                {note}
-                              </div>
-                            )}
-                          </button>
-                        );
-                      })}
+  // NEW: real assignees for THIS task in THIS slot (independent of merging)
+  const allAssignees = getAssigneesForTask(slotIndex, taskText);
+  const assigneeCount = allAssignees.length || 1;
+  const assigneeLabel = assigneeCount === 1 ? "person" : "people";
+
+  const note = taskText
+    .split("\n")
+    .slice(1)
+    .join("\n");
+
+  const perHeight = Math.max(
+    spanHeight / displayTasks.length,
+    baseRowHeight * 0.7
+  );
+
+  return (
+    <button
+      key={`${visualRow}-${slotIndex}-${primaryTitle}-${idx}`}
+      type="button"
+      onClick={() => {
+        onTaskClick?.({
+          person: pickPrimaryPerson(allAssignees),
+          slot,
+          task: taskText,
+          groupNames: allAssignees.length ? allAssignees : [person],
+        });
+      }}
+      style={{ minHeight: `${perHeight}px` }}
+      className={`flex h-full min-h-full w-full flex-col justify-between gap-2 text-left rounded-md border p-2 text-[11px] leading-snug shadow-sm focus:outline-none focus:ring-2 focus:ring-[#8fae4c] ${typeColorClasses(
+        meta?.typeColor
+      )}`}
+    >
+      <div className="flex justify-between items-start gap-2">
+        <span className="font-semibold">{primaryTitle}</span>
+
+        {/* CHANGED: always show the count, even if it is 1 */}
+        <span className="text-[9px] text-[#4f4f31] bg-white/70 rounded-full px-2 py-[1px]">
+          {assigneeCount} {assigneeLabel}
+        </span>
+      </div>
+
+      <div className="mt-1">
+        <StatusBadge
+          status={meta?.status}
+          color={statusColors[meta?.status || ""]}
+        />
+      </div>
+
+      {!!note && (
+        <div className="whitespace-pre-line text-[10px] text-[#5b593c]">
+          {note}
+        </div>
+      )}
+    </button>
+  );
+})}
+
                     </div>
                   </td>
                 );
