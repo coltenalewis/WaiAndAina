@@ -2210,14 +2210,51 @@ function ScheduleGrid({
   );
   const originalIndices = people.map((_, idx) => idx);
 
+  // Normalize cells so merges + assignee detection are resilient to ordering/notes.
+  function normalizeCellTasks(cell: string): string[] {
+    return splitCellTasks(cell)
+      .map((t) => taskBaseName(t))
+      .filter(Boolean)
+      .sort((a, b) => a.localeCompare(b));
+  }
+
+  function cellSignature(cell: string): string {
+    const bases = normalizeCellTasks(cell);
+    return bases.join("||");
+  }
+
+  function getAssigneesForTask(slotIdx: number, taskText: string): string[] {
+    const base = taskBaseName(taskText);
+    if (!base) return [];
+
+    const assignees: string[] = [];
+    for (let i = 0; i < people.length; i++) {
+      const cell = (cells[i]?.[slotIdx] ?? "").trim();
+      if (!cell) continue;
+
+      const hasTask = splitCellTasks(cell).some(
+        (t) => taskBaseName(t) === base
+      );
+      if (hasTask) assignees.push(people[i]);
+    }
+    return assignees;
+  }
+
+  function pickPrimaryPerson(group: string[]): string {
+    if (!group.length) return "Team";
+    const me = (currentUserName || "").trim().toLowerCase();
+    const includesMe = me && group.some((p) => p.toLowerCase() === me);
+    return includesMe ? (currentUserName as string) : group[0];
+  }
+
   const similarity = (a: number, b: number) => {
     let score = 0;
     let streak = 0;
     let bestStreak = 0;
     workSlotIndices.forEach((slotIdx) => {
-      const taskA = (cells[a]?.[slotIdx] ?? "").trim();
-      const taskB = (cells[b]?.[slotIdx] ?? "").trim();
-      if (taskA && taskA === taskB) {
+      const sigA = cellSignature((cells[a]?.[slotIdx] ?? "").trim());
+      const sigB = cellSignature((cells[b]?.[slotIdx] ?? "").trim());
+      if (sigA && sigA === sigB) {
         score++;
         streak++;
         if (streak > bestStreak) bestStreak = streak;
@@ -2249,7 +2286,7 @@ function ScheduleGrid({
         0
       );
       const userBoost = baseIndex !== -1 ? similarity(baseIndex, idx) : 0;
-      const score = sharedWithPlaced + userBoost;
+      const score = sharedWithPlaced + userBoost * 2.25;
 
       if (score > bestScore) {
         bestScore = score;
@@ -2278,9 +2315,10 @@ function ScheduleGrid({
     let r = 0;
     while (r < numRows) {
       const baseRow = rowOrder[r];
-      const task = (cells[baseRow]?.[slotIndex] ?? "").trim();
+      const cell = (cells[baseRow]?.[slotIndex] ?? "").trim();
+      const sig = cellSignature(cell);
 
-      if (!task) {
+      if (!cell) {
         rowSpan[r][c] = 1;
         r++;
         continue;
@@ -2289,8 +2327,9 @@ function ScheduleGrid({
       let end = r + 1;
       while (end < numRows) {
         const nextRow = rowOrder[end];
-        const nextTask = (cells[nextRow]?.[slotIndex] ?? "").trim();
-        if (nextTask !== task) break;
+        const nextCell = (cells[nextRow]?.[slotIndex] ?? "").trim();
+        const nextSig = cellSignature(nextCell);
+        if (!sig || nextSig !== sig) break;
         end++;
       }
 
@@ -2336,7 +2375,9 @@ function ScheduleGrid({
           const realRow = rowOrder[vr];
           const compareBase = (cells[realRow]?.[slotIndex] ?? "").trim();
           const compareNext = (cells[realRow]?.[nextSlotIndex] ?? "").trim();
-          if (!compareBase || compareBase !== compareNext) {
+          const sigBase = cellSignature(compareBase);
+          const sigNext = cellSignature(compareNext);
+          if (!sigBase || sigBase !== sigNext) {
             allMatch = false;
             break;
           }
@@ -2483,14 +2524,15 @@ function ScheduleGrid({
                           <button
                             key={`${visualRow}-${slotIndex}-${primaryTitle}-${idx}`}
                             type="button"
-                            onClick={() =>
+                            onClick={() => {
+                              const allAssignees = getAssigneesForTask(slotIndex, taskText);
                               onTaskClick?.({
-                                person,
+                                person: pickPrimaryPerson(allAssignees),
                                 slot,
                                 task: taskText,
-                                groupNames,
-                              })
-                            }
+                                groupNames: allAssignees.length ? allAssignees : [person],
+                              });
+                            }}
                             style={{ minHeight: `${perHeight}px` }}
                             className={`flex h-full min-h-full w-full flex-col justify-between gap-2 text-left rounded-md border p-2 text-[11px] leading-snug shadow-sm focus:outline-none focus:ring-2 focus:ring-[#8fae4c] ${typeColorClasses(
                               meta?.typeColor
