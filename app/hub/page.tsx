@@ -172,6 +172,31 @@ function typeColorClasses(color?: string) {
   return map[color || "default"] || map.default;
 }
 
+function computeGroupNamesForSlotTask(
+  schedule: ScheduleResponse,
+  slotId: string,
+  taskFullText: string
+): string[] {
+  const slotIdx = schedule.slots.findIndex((s) => s.id === slotId);
+  if (slotIdx === -1) return [];
+
+  const base = taskBaseName(taskFullText || "");
+  if (!base) return [];
+
+  const names: string[] = [];
+
+  schedule.people.forEach((person, rowIdx) => {
+    const cell = (schedule.cells[rowIdx]?.[slotIdx] ?? "").trim();
+    if (!cell) return;
+
+    const hasTask = splitCellTasks(cell).some((t) => taskBaseName(t) === base);
+    if (hasTask) names.push(person);
+  });
+
+  // de-dupe, preserve order
+  return Array.from(new Set(names));
+}
+
 export default function HubSchedulePage() {
   const [data, setData] = useState<ScheduleResponse | null>(null);
   const [loading, setLoading] = useState(true);
@@ -1011,30 +1036,48 @@ export default function HubSchedulePage() {
   }
 
   // When a task box is clicked
-  async function handleTaskClick(taskPayload: TaskClickPayload) {
-    setModalTask(taskPayload);
-    setModalDetails(null);
-    setModalIsMeal(!!taskPayload.isMeal);
-    setCommentDraft("");
+async function handleTaskClick(taskPayload: TaskClickPayload) {
+  // Always recompute group membership from the schedule matrix so the modal
+  // never shows "solo" just because boxes didn't merge.
+  const schedule = data;
+  const computedGroup =
+    schedule && taskPayload?.slot?.id
+      ? computeGroupNamesForSlotTask(schedule, taskPayload.slot.id, taskPayload.task)
+      : [];
 
-    const baseTitle = taskBaseName(taskPayload.task || "");
-    if (!baseTitle) {
-      setModalDetails({
-        name: taskPayload.task,
-        description: "",
-        extraNotes: "",
-        status: "",
-        comments: [],
-        media: [],
-        links: [],
-        taskType: { name: "", color: "default" },
-        estimatedTime: "",
-      });
-      return;
-    }
+  const mergedPayload: TaskClickPayload = {
+    ...taskPayload,
+    groupNames: computedGroup.length ? computedGroup : (taskPayload.groupNames || []),
+    person:
+      taskPayload.person ||
+      (computedGroup.length ? computedGroup[0] : "") ||
+      "Team",
+  };
 
-    await loadTaskDetails(baseTitle);
+  setModalTask(mergedPayload);
+  setModalDetails(null);
+  setModalIsMeal(!!mergedPayload.isMeal);
+  setCommentDraft("");
+
+  const baseTitle = taskBaseName(mergedPayload.task || "");
+  if (!baseTitle) {
+    setModalDetails({
+      name: mergedPayload.task,
+      description: "",
+      extraNotes: "",
+      status: "",
+      comments: [],
+      media: [],
+      links: [],
+      taskType: { name: "", color: "default" },
+      estimatedTime: "",
+    });
+    return;
   }
+
+  await loadTaskDetails(baseTitle);
+}
+
 
   function closeModal() {
     setModalTask(null);
