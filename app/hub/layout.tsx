@@ -89,6 +89,7 @@ export default function HubLayout({ children }: { children: ReactNode }) {
     ];
 
     if (isAdmin) {
+      links.push({ href: "/hub/admin/schedule", label: "Admin Schedule", icon: "🗂️" });
       links.push({ href: "/hub/admin", label: "Admin", icon: "🛠️" });
     }
 

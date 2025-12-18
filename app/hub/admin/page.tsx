@@ -1,35 +1,12 @@
 "use client";
 
 import React, { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { loadSession } from "@/lib/session";
 
 type ReportItem = { id: string; title: string; date?: string };
 type UserItem = { id: string; name: string; userType: string; goats: number };
-type Slot = { id: string; label: string };
-type TaskTypeOption = { name: string; color: string };
-type StatusOption = { name: string; color: string };
-type ScheduleResponse = {
-  people: string[];
-  slots: { id: string; label: string; timeRange?: string; isMeal?: boolean }[];
-  cells: string[][];
-  scheduleDate?: string;
-  reportTime?: string;
-  taskResetTime?: string;
-  message?: string;
-};
-type TaskCatalogItem = {
-  id: string;
-  name: string;
-  type?: string;
-  typeColor?: string;
-  status?: string;
-};
-type TaskDetail = {
-  name: string;
-  description: string;
-  taskType?: { name: string; color: string };
-};
 type ReportBlock = {
   id: string;
   type: string;
@@ -42,41 +19,6 @@ type ReportBlock = {
 
 function toNotionUrl(id: string) {
   return `https://www.notion.so/${id.replace(/-/g, "")}`;
-}
-
-function splitCellTasks(cell: string) {
-  if (!cell.trim()) return [] as string[];
-
-  const [firstLine, ...rest] = cell.split("\n");
-  const note = rest.join("\n").trim();
-
-  return firstLine
-    .split(",")
-    .map((t) => t.trim())
-    .filter(Boolean)
-    .map((t) => (note ? `${t}\n${note}` : t))
-    .filter((t) => taskBaseName(t) && taskBaseName(t) !== "-");
-}
-
-function taskBaseName(task: string): string {
-  return task.split("\n")[0].trim();
-}
-
-function typeColorClasses(color?: string) {
-  const map: Record<string, string> = {
-    default: "bg-[#f7f7ef] border-[#e3e6d2] text-[#3f4630]",
-    gray: "bg-slate-50 border-slate-200 text-slate-800",
-    brown: "bg-amber-50 border-amber-200 text-amber-900",
-    orange: "bg-orange-50 border-orange-200 text-orange-900",
-    yellow: "bg-amber-100 border-amber-200 text-amber-900",
-    green: "bg-green-50 border-green-200 text-green-900",
-    blue: "bg-sky-50 border-sky-200 text-sky-900",
-    purple: "bg-violet-50 border-violet-200 text-violet-900",
-    pink: "bg-pink-50 border-pink-200 text-pink-900",
-    red: "bg-rose-50 border-rose-200 text-rose-900",
-  };
-
-  return map[color || "default"] || map.default;
 }
 
 function renderRichText(nodes?: { plain: string; href?: string; annotations?: any }[]) {
@@ -235,25 +177,7 @@ export default function AdminPage() {
   const [reportLoading, setReportLoading] = useState(false);
   const [users, setUsers] = useState<UserItem[]>([]);
   const [newUser, setNewUser] = useState({ name: "", userType: "Volunteer" });
-  const [scheduleData, setScheduleData] = useState<ScheduleResponse | null>(null);
-  const [slots, setSlots] = useState<Slot[]>([]);
-  const [taskBank, setTaskBank] = useState<TaskCatalogItem[]>([]);
-  const [taskTypes, setTaskTypes] = useState<TaskTypeOption[]>([]);
-  const [statusOptions, setStatusOptions] = useState<StatusOption[]>([]);
-  const [taskSearch, setTaskSearch] = useState("");
-  const [taskTypeFilter, setTaskTypeFilter] = useState("");
-  const [taskStatusFilter, setTaskStatusFilter] = useState("");
-  const [selectedCell, setSelectedCell] = useState<{
-    person: string;
-    slotId: string;
-    slotLabel: string;
-    tasks: string[];
-  } | null>(null);
-  const [customTask, setCustomTask] = useState("");
   const [goatUpdate, setGoatUpdate] = useState({ userId: "", goats: "" });
-  const [selectedTaskName, setSelectedTaskName] = useState<string | null>(null);
-  const [selectedTaskDetail, setSelectedTaskDetail] = useState<TaskDetail | null>(null);
-  const [taskDetailLoading, setTaskDetailLoading] = useState(false);
   const [resettingTasks, setResettingTasks] = useState(false);
 
   useEffect(() => {
@@ -290,52 +214,8 @@ export default function AdminPage() {
       } catch (err) {
         console.error("Failed to load users", err);
       }
-
-      try {
-        const res = await fetch("/api/schedule");
-        if (res.ok) {
-          const json = await res.json();
-          setScheduleData(json);
-          setSlots((json.slots || []).map((s: any) => ({ id: s.id, label: s.label })));
-        }
-      } catch (err) {
-        console.error("Failed to load schedule options", err);
-      }
-
-      try {
-        const res = await fetch("/api/task?list=1");
-        if (res.ok) {
-          const json = await res.json();
-          setTaskBank(json.tasks || []);
-        }
-      } catch (err) {
-        console.error("Failed to load task bank", err);
-      }
-
-      try {
-        const res = await fetch("/api/task-types");
-        if (res.ok) {
-          const json = await res.json();
-          setTaskTypes(json.types || []);
-          setStatusOptions(json.statuses || []);
-        }
-      } catch (err) {
-        console.error("Failed to load task type options", err);
-      }
     })();
   }, [authorized]);
-
-  async function refreshSchedule() {
-    try {
-      const res = await fetch("/api/schedule");
-      if (res.ok) {
-        const json = await res.json();
-        setScheduleData(json);
-      }
-    } catch (err) {
-      console.error("Failed to refresh schedule", err);
-    }
-  }
 
   async function handleCreateReport() {
     setLoading(true);
@@ -384,21 +264,6 @@ export default function AdminPage() {
     );
   }, [reportFilter, reports]);
 
-  const filteredTaskBank = useMemo(() => {
-    return taskBank.filter((task) => {
-      const matchesSearch = task.name
-        .toLowerCase()
-        .includes(taskSearch.toLowerCase());
-      const matchesType = taskTypeFilter
-        ? (task.type || "").toLowerCase() === taskTypeFilter.toLowerCase()
-        : true;
-      const matchesStatus = taskStatusFilter
-        ? (task.status || "").toLowerCase() === taskStatusFilter.toLowerCase()
-        : true;
-      return matchesSearch && matchesType && matchesStatus;
-    });
-  }, [taskBank, taskSearch, taskStatusFilter, taskTypeFilter]);
-
   async function handleCreateUser(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     try {
@@ -434,28 +299,6 @@ export default function AdminPage() {
     }
   }
 
-  async function loadTaskDetailForEdit(taskName: string) {
-    const base = taskBaseName(taskName);
-    if (!base) return;
-    setSelectedTaskName(base);
-    setTaskDetailLoading(true);
-    try {
-      const res = await fetch(`/api/task?name=${encodeURIComponent(base)}`);
-      const json = await res.json();
-      if (!res.ok) throw new Error(json.error || "Failed to load task");
-      setSelectedTaskDetail({
-        name: json.name || base,
-        description: json.description || "",
-        taskType: json.taskType,
-      });
-    } catch (err: any) {
-      setMessage(err?.message || "Unable to load task details");
-      setSelectedTaskDetail(null);
-    } finally {
-      setTaskDetailLoading(false);
-    }
-  }
-
   async function handleGoatUpdateSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     if (!goatUpdate.userId) {
@@ -475,117 +318,6 @@ export default function AdminPage() {
       setUsers(json.users || []);
     } catch (err: any) {
       setMessage(err?.message || "Could not update goats");
-    }
-  }
-
-  async function handleTaskDetailSave() {
-    if (!selectedTaskName) return;
-    try {
-      const res = await fetch("/api/task", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name: selectedTaskName,
-          description: selectedTaskDetail?.description ?? "",
-          taskType: selectedTaskDetail?.taskType?.name || "",
-        }),
-      });
-      const json = await res.json();
-      if (!res.ok) throw new Error(json.error || "Failed to save task");
-      setMessage("Task updated.");
-    } catch (err: any) {
-      setMessage(err?.message || "Unable to update task");
-    }
-  }
-
-  async function addTaskToSlot(person: string, slotId: string, taskName: string) {
-    if (!person || !slotId || !taskName) return;
-    setMessage(null);
-    try {
-      const res = await fetch("/api/schedule/update", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ person, slotId, addTask: taskName }),
-      });
-      if (!res.ok) throw new Error("Failed to update schedule");
-      setMessage(`Assigned ${taskName} to ${person}.`);
-      await refreshSchedule();
-      setSelectedCell((prev) =>
-        prev && prev.person === person && prev.slotId === slotId
-          ? { ...prev, tasks: [...prev.tasks, taskName] }
-          : prev
-      );
-    } catch (err: any) {
-      setMessage(err?.message || "Could not assign task.");
-    }
-  }
-
-  async function removeTaskFromSlot(person: string, slotId: string, taskName: string) {
-    try {
-      const res = await fetch("/api/schedule/update", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ person, slotId, removeTask: taskName }),
-      });
-      if (!res.ok) throw new Error("Failed to update schedule");
-      setMessage(`Removed ${taskName} from ${person}.`);
-      await refreshSchedule();
-      setSelectedCell((prev) =>
-        prev && prev.person === person && prev.slotId === slotId
-          ? { ...prev, tasks: prev.tasks.filter((t) => t !== taskName) }
-          : prev
-      );
-    } catch (err: any) {
-      setMessage(err?.message || "Could not remove task.");
-    }
-  }
-
-  function handleDrop(
-    e: React.DragEvent<HTMLDivElement>,
-    person: string,
-    slotId: string,
-    slotLabel: string
-  ) {
-    e.preventDefault();
-    const jsonPayload = e.dataTransfer.getData("application/json/task");
-    let taskName = e.dataTransfer.getData("text/task-name");
-    let fromPerson: string | null = null;
-    let fromSlotId: string | null = null;
-
-    if (jsonPayload) {
-      try {
-        const parsed = JSON.parse(jsonPayload);
-        taskName = parsed.taskName || taskName;
-        fromPerson = parsed.fromPerson || null;
-        fromSlotId = parsed.fromSlotId || null;
-      } catch (err) {
-        console.error("Failed to parse drag payload", err);
-      }
-    }
-
-    if (taskName) {
-      addTaskToSlot(person, slotId, taskName);
-      if (
-        fromPerson &&
-        fromSlotId &&
-        (fromPerson !== person || fromSlotId !== slotId)
-      ) {
-        removeTaskFromSlot(fromPerson, fromSlotId, taskName);
-      }
-
-      const rowIdx = scheduleData?.people.indexOf(person) ?? -1;
-      const colIdx = scheduleData?.slots.findIndex((s) => s.id === slotId) ?? -1;
-      const cellValue =
-        rowIdx > -1 && colIdx > -1
-          ? scheduleData?.cells?.[rowIdx]?.[colIdx] || ""
-          : "";
-
-      setSelectedCell({
-        person,
-        slotId,
-        slotLabel,
-        tasks: splitCellTasks(cellValue),
-      });
     }
   }
 
@@ -759,358 +491,33 @@ export default function AdminPage() {
             </div>
 
             <div className="rounded-2xl border border-[#d0c9a4] bg-white/70 p-5 shadow-sm">
-              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <div>
-                  <h2 className="text-lg font-semibold text-[#314123]">Schedule sandbox</h2>
+                  <h2 className="text-lg font-semibold text-[#314123]">Scheduling tools</h2>
                   <p className="text-sm text-[#5f5a3b]">
-                    Drag tasks from the bank into any slot. This mirrors Today&apos;s Schedule with every shift included.
+                    The drag-and-drop schedule editor now lives on its own admin page for more breathing room and smoother updates.
                   </p>
                   <p className="text-xs text-[#6a6c4d]">
-                    {scheduleData?.scheduleDate
-                      ? `Schedule date: ${scheduleData.scheduleDate}`
-                      : scheduleData?.message || ""}
+                    Reorder tasks, move work between shifts, and chat with the AI assistant directly inside the new workspace.
                   </p>
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={refreshSchedule}
-                    className="rounded-md bg-[#e6edcc] px-3 py-2 text-xs font-semibold uppercase tracking-[0.1em] text-[#314123] shadow-sm transition hover:bg-[#d6e4ad]"
+                  <Link
+                    href="/hub/admin/schedule"
+                    className="rounded-md bg-[#8fae4c] px-4 py-2 text-xs font-semibold uppercase tracking-[0.1em] text-[#f9f9ec] shadow-md transition hover:bg-[#7e9c44]"
                   >
-                    Refresh schedule
-                  </button>
-                </div>
-              </div>
-              <div className="mt-4 grid gap-4 lg:grid-cols-3">
-                <div className="lg:col-span-2">
-                  <div className="overflow-auto rounded-xl border border-[#e2d7b5] bg-[#faf7eb]">
-                    <table className="min-w-full border-collapse text-sm">
-                      <thead className="bg-[#e5e7c5]">
-                        <tr>
-                          <th className="min-w-[140px] border border-[#d1d4aa] px-3 py-2 text-left text-[11px] font-semibold uppercase tracking-[0.12em] text-[#5d7f3b]">
-                            Person
-                          </th>
-                          {scheduleData?.slots.map((slot) => (
-                            <th
-                              key={slot.id}
-                              className="border border-[#d1d4aa] px-3 py-2 text-left text-[11px] font-semibold uppercase tracking-[0.12em] text-[#5d7f3b]"
-                            >
-                              <div className="flex items-center gap-2">
-                                <div>
-                                  <div>{slot.label}</div>
-                                  {slot.timeRange && (
-                                    <div className="text-[10px] text-[#7a7f54] normal-case">{slot.timeRange}</div>
-                                  )}
-                                </div>
-                              </div>
-                            </th>
-                          ))}
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {scheduleData?.people.map((person, rowIdx) => (
-                          <tr
-                            key={person}
-                            className={rowIdx % 2 === 0 ? "bg-[#faf8ea]" : "bg-[#f4f2df]"}
-                          >
-                            <td className="border border-[#d1d4aa] px-3 py-2 align-top text-sm font-semibold text-[#4f5730]">
-                              {person}
-                            </td>
-                            {scheduleData.slots.map((slot, colIdx) => {
-                              const cell = scheduleData.cells?.[rowIdx]?.[colIdx] || "";
-                              const tasks = splitCellTasks(cell);
-                              const isSelected =
-                                selectedCell?.person === person && selectedCell?.slotId === slot.id;
-                              const minHeight = 72;
-
-                              return (
-                                <td
-                                  key={`${person}-${slot.id}`}
-                                  className={`border border-[#d1d4aa] p-1 align-top ${
-                                    isSelected ? "bg-[#f0f4de]" : ""
-                                  }`}
-                                  style={{ minHeight: `${minHeight}px` }}
-                                  onDragOver={(e) => e.preventDefault()}
-                                  onDrop={(e) => handleDrop(e, person, slot.id, slot.label)}
-                                  onClick={() =>
-                                    setSelectedCell({
-                                      person,
-                                      slotId: slot.id,
-                                      slotLabel: slot.label,
-                                      tasks,
-                                    })
-                                  }
-                                >
-                                  <div className="flex h-full w-full flex-col gap-2">
-                                    {tasks.map((task) => {
-                                      const base = taskBaseName(task);
-                                      const meta = taskBank.find((t) => t.name === base);
-                                      return (
-                                        <button
-                                          key={`${person}-${slot.id}-${task}`}
-                                          type="button"
-                                          draggable
-                                          onDragStart={(e) => {
-                                            e.dataTransfer.setData("text/task-name", base);
-                                            e.dataTransfer.setData(
-                                              "application/json/task",
-                                              JSON.stringify({
-                                                taskName: base,
-                                                fromPerson: person,
-                                                fromSlotId: slot.id,
-                                              })
-                                            );
-                                          }}
-                                          onClick={() => {
-                                            setSelectedCell({
-                                              person,
-                                              slotId: slot.id,
-                                              slotLabel: slot.label,
-                                              tasks,
-                                            });
-                                            loadTaskDetailForEdit(task);
-                                          }}
-                                          className={`flex h-full min-h-full w-full flex-col justify-between gap-2 rounded-md border p-2 text-left text-[11px] leading-snug shadow-sm transition focus:outline-none focus:ring-2 focus:ring-[#8fae4c] ${typeColorClasses(
-                                            meta?.typeColor
-                                          )}`}
-                                          style={{ minHeight: `${minHeight * 0.9}px` }}
-                                        >
-                                          <div className="flex items-start justify-between gap-2">
-                                            <span className="font-semibold">{base}</span>
-                                            {meta?.status && (
-                                              <span className="rounded-full bg-white/80 px-2 py-[1px] text-[9px] font-semibold text-[#4f4f31]">
-                                                {meta.status}
-                                              </span>
-                                            )}
-                                          </div>
-                                          {task.includes("\n") && (
-                                            <div className="whitespace-pre-line text-[11px] text-[#4f4b33] opacity-90">
-                                              {task.split("\n").slice(1).join("\n")}
-                                            </div>
-                                          )}
-                                        </button>
-                                      );
-                                    })}
-
-                                    {!tasks.length && (
-                                      <div className="flex h-full min-h-[60px] items-center justify-center rounded-md border border-dashed border-[#d0c9a4] bg-white/60 text-[11px] italic text-[#7a7f54]">
-                                        Drop tasks here
-                                      </div>
-                                    )}
-                                  </div>
-                                </td>
-                              );
-                            })}
-                          </tr>
-                        ))}
-                        {!scheduleData?.people?.length && (
-                          <tr>
-                            <td
-                              colSpan={(scheduleData?.slots?.length || 0) + 1}
-                              className="px-3 py-4 text-center text-sm text-[#7a7f54]"
-                            >
-                              No schedule found.
-                            </td>
-                          </tr>
-                        )}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-                <div className="space-y-4">
-                  <div className="rounded-lg border border-[#e2d7b5] bg-[#f9f6e7] p-3">
-                    <div className="flex items-center justify-between gap-2">
-                      <h3 className="text-sm font-semibold text-[#314123]">Task bank</h3>
-                      <span className="text-[11px] text-[#6b6d4b]">Drag to assign</span>
-                    </div>
-                    <div className="mt-2 grid gap-2 md:grid-cols-3">
-                      <input
-                        value={taskSearch}
-                        onChange={(e) => setTaskSearch(e.target.value)}
-                        placeholder="Search tasks"
-                        className="w-full rounded-md border border-[#d0c9a4] px-2 py-2 text-sm focus:border-[#8fae4c] focus:outline-none"
-                      />
-                      <select
-                        value={taskTypeFilter}
-                        onChange={(e) => setTaskTypeFilter(e.target.value)}
-                        className="w-full rounded-md border border-[#d0c9a4] px-2 py-2 text-sm focus:border-[#8fae4c] focus:outline-none"
-                      >
-                        <option value="">All types</option>
-                        {taskTypes.map((opt) => (
-                          <option key={opt.name} value={opt.name}>
-                            {opt.name}
-                          </option>
-                        ))}
-                      </select>
-                      <select
-                        value={taskStatusFilter}
-                        onChange={(e) => setTaskStatusFilter(e.target.value)}
-                        className="w-full rounded-md border border-[#d0c9a4] px-2 py-2 text-sm focus:border-[#8fae4c] focus:outline-none"
-                      >
-                        <option value="">All statuses</option>
-                        {statusOptions.map((opt) => (
-                          <option key={opt.name} value={opt.name}>
-                            {opt.name}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                    <div className="mt-2 max-h-64 space-y-2 overflow-y-auto pr-1">
-                      {filteredTaskBank.map((task) => (
-                        <button
-                          key={task.id}
-                          draggable
-                          onDragStart={(e) => {
-                            e.dataTransfer.setData("text/task-name", task.name);
-                            e.dataTransfer.setData(
-                              "application/json/task",
-                              JSON.stringify({ taskName: task.name })
-                            );
-                          }}
-                          onClick={() => loadTaskDetailForEdit(task.name)}
-                          className={`flex w-full items-center justify-between rounded-md border px-3 py-2 text-left text-sm text-[#2f3b21] shadow-sm transition hover:border-[#9fb668] ${typeColorClasses(task.typeColor)}`}
-                        >
-                          <div>
-                            <div className="font-semibold">{task.name}</div>
-                            <div className="text-[11px] text-[#5f5a3b]">
-                              {task.type || "Uncategorized"}
-                              {task.status ? ` • ${task.status}` : ""}
-                            </div>
-                          </div>
-                          <span className="text-lg">🐐</span>
-                        </button>
-                      ))}
-                      {!filteredTaskBank.length && (
-                        <p className="text-[12px] text-[#7a7f54]">No tasks loaded yet.</p>
-                      )}
-                    </div>
-                  </div>
-
-                  <div className="rounded-lg border border-[#e2d7b5] bg-white/70 p-3">
-                    <h3 className="text-sm font-semibold text-[#314123]">Task editor</h3>
-                    {selectedCell ? (
-                      <div className="mt-2 space-y-2 text-sm text-[#4b5133]">
-                        <p className="text-[12px] text-[#6b6d4b]">
-                          {selectedCell.person} • {selectedCell.slotLabel}
-                        </p>
-                        <div className="space-y-1">
-                          {selectedCell.tasks.map((task) => (
-                            <div
-                              key={task}
-                              className="flex items-center justify-between rounded-md border border-[#e2d7b5] bg-[#f6f1dd] px-2 py-1"
-                            >
-                              <button
-                                type="button"
-                                onClick={() => loadTaskDetailForEdit(task)}
-                                className="text-[12px] font-semibold text-[#2f3b21] underline-offset-2 hover:underline"
-                              >
-                                {task}
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => removeTaskFromSlot(selectedCell.person, selectedCell.slotId, task)}
-                                className="text-[11px] font-semibold text-[#a05252] hover:underline"
-                              >
-                                Remove
-                              </button>
-                            </div>
-                          ))}
-                          {!selectedCell.tasks.length && (
-                            <p className="text-[12px] text-[#7a7f54]">No tasks yet. Drag one in or add below.</p>
-                          )}
-                        </div>
-                        {selectedTaskDetail && (
-                          <div className="rounded-md border border-[#e2d7b5] bg-[#f9f6e7] p-3 space-y-2">
-                            <div className="flex items-center justify-between text-[12px] text-[#4f4b33]">
-                              <span className="font-semibold">Editing {selectedTaskDetail.name}</span>
-                              {taskDetailLoading && (
-                                <span className="text-[11px] text-[#7a7f54]">Loading…</span>
-                              )}
-                            </div>
-                            <div className="space-y-1 text-[12px]">
-                              <label className="text-[#5f5a3b]">Description</label>
-                              <textarea
-                                value={selectedTaskDetail.description}
-                                onChange={(e) =>
-                                  setSelectedTaskDetail((prev) =>
-                                    prev ? { ...prev, description: e.target.value } : prev
-                                  )
-                                }
-                                className="min-h-[80px] w-full rounded-md border border-[#d0c9a4] px-2 py-2 text-sm focus:border-[#8fae4c] focus:outline-none"
-                              />
-                            </div>
-                            <div className="space-y-1 text-[12px]">
-                              <label className="text-[#5f5a3b]">Task type</label>
-                              <select
-                                value={selectedTaskDetail.taskType?.name || ""}
-                                onChange={(e) =>
-                                  setSelectedTaskDetail((prev) =>
-                                    prev
-                                      ? {
-                                          ...prev,
-                                          taskType: {
-                                            name: e.target.value,
-                                            color:
-                                              taskTypes.find((t) => t.name === e.target.value)?.color ||
-                                              "default",
-                                          },
-                                        }
-                                      : prev
-                                  )
-                                }
-                                className="w-full rounded-md border border-[#d0c9a4] px-2 py-2 text-sm focus:border-[#8fae4c] focus:outline-none"
-                              >
-                                <option value="">Uncategorized</option>
-                                {taskTypes.map((opt) => (
-                                  <option key={opt.name} value={opt.name}>
-                                    {opt.name}
-                                  </option>
-                                ))}
-                              </select>
-                            </div>
-                            <div className="flex justify-end gap-2">
-                              <button
-                                type="button"
-                                onClick={handleTaskDetailSave}
-                                className="rounded-md bg-[#8fae4c] px-3 py-2 text-[12px] font-semibold uppercase tracking-[0.1em] text-[#f9f9ec] shadow-sm transition hover:bg-[#7e9c44]"
-                                disabled={taskDetailLoading}
-                              >
-                                Save changes
-                              </button>
-                            </div>
-                          </div>
-                        )}
-                        <div className="space-y-1">
-                          <label className="text-[12px] text-[#5f5a3b]">Add a custom task</label>
-                          <div className="flex items-center gap-2">
-                            <input
-                              value={customTask}
-                              onChange={(e) => setCustomTask(e.target.value)}
-                              className="flex-1 rounded-md border border-[#d0c9a4] px-2 py-2 text-sm focus:border-[#8fae4c] focus:outline-none"
-                              placeholder="e.g., Cow Milking"
-                            />
-                            <button
-                              type="button"
-                              onClick={() => {
-                                if (customTask.trim()) {
-                                  addTaskToSlot(selectedCell.person, selectedCell.slotId, customTask.trim());
-                                  setCustomTask("");
-                                }
-                              }}
-                              className="rounded-md bg-[#8fae4c] px-3 py-2 text-[12px] font-semibold uppercase tracking-[0.1em] text-[#f9f9ec] shadow-sm transition hover:bg-[#7e9c44]"
-                            >
-                              Add
-                            </button>
-                          </div>
-                        </div>
-                      </div>
-                    ) : (
-                      <p className="mt-2 text-[12px] text-[#7a7f54]">Select a cell to edit tasks.</p>
-                    )}
-                  </div>
+                    Open schedule editor
+                  </Link>
+                  <Link
+                    href="/hub"
+                    className="rounded-md border border-[#d0c9a4] bg-white px-4 py-2 text-xs font-semibold uppercase tracking-[0.1em] text-[#314123] shadow-sm transition hover:bg-[#f1edd8]"
+                  >
+                    View live schedule
+                  </Link>
                 </div>
               </div>
             </div>
+
           </>
         )}
 
