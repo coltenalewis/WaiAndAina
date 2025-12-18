@@ -438,7 +438,9 @@ export default function AdminScheduleEditorPage() {
       if (!res.ok) throw new Error(json.error || "Upload failed");
 
       setPhotoMessage("Photo uploaded to Notion Photos.");
-      photoInputRef.current && (photoInputRef.current.value = "");
+      if (photoInputRef.current) {
+        photoInputRef.current.value = "";
+      }
       await loadTaskDetail(taskDetail.name);
     } catch (err) {
       console.error(err);
@@ -464,7 +466,7 @@ export default function AdminScheduleEditorPage() {
           <p className="text-xs uppercase tracking-[0.14em] text-[#7a7f54]">Admin schedule</p>
           <h1 className="text-2xl font-semibold text-[#314123]">{scheduleTitle}</h1>
           <p className="text-sm text-[#5f5a3b]">
-            Drag tasks anywhere, reorder inside a shift, and keep context with the built-in assistant.
+            Drag tasks anywhere and reorder inside a shift with smooth autosave.
           </p>
           <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-[#6a6c4d]">
             <button
@@ -487,7 +489,7 @@ export default function AdminScheduleEditorPage() {
           <ul className="mt-1 list-disc space-y-1 pl-4 text-xs text-[#6a6c4d]">
             <li>Drop between tasks to reorder within the same shift.</li>
             <li>Use the always-visible task dock to assign from anywhere.</li>
-            <li>Use the AI assistant chip (bottom-right) to ask about guides, databases, and schedules.</li>
+            <li>Scroll the schedule grid independently while the task dock stays pinned.</li>
           </ul>
         </div>
       </div>
@@ -498,7 +500,7 @@ export default function AdminScheduleEditorPage() {
         </div>
       )}
 
-      <div className="grid gap-5 xl:grid-cols-[2fr_minmax(340px,1fr)]">
+      <div className="grid gap-5 xl:grid-cols-[minmax(0,1.6fr)_minmax(340px,1fr)]">
         <div className="rounded-2xl border border-[#d0c9a4] bg-white/70 p-4 shadow-sm">
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
             <div>
@@ -515,7 +517,7 @@ export default function AdminScheduleEditorPage() {
             </div>
           </div>
 
-          <div className="mt-3 max-h-[70vh] min-h-[50vh] overflow-auto rounded-xl border border-[#e2d7b5] bg-[#faf7eb] shadow-inner">
+          <div className="mt-3 max-h-[calc(100vh-220px)] min-h-[50vh] overflow-auto rounded-xl border border-[#e2d7b5] bg-[#faf7eb] shadow-inner">
             <table className="min-w-full border-collapse text-sm">
               <thead className="bg-[#e5e7c5]">
                 <tr>
