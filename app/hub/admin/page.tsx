@@ -14,6 +14,8 @@ type ScheduleResponse = {
   slots: { id: string; label: string; timeRange?: string; isMeal?: boolean }[];
   cells: string[][];
   scheduleDate?: string;
+  reportTime?: string;
+  taskResetTime?: string;
   message?: string;
 };
 type TaskCatalogItem = {
@@ -52,7 +54,8 @@ function splitCellTasks(cell: string) {
     .split(",")
     .map((t) => t.trim())
     .filter(Boolean)
-    .map((t) => (note ? `${t}\n${note}` : t));
+    .map((t) => (note ? `${t}\n${note}` : t))
+    .filter((t) => taskBaseName(t) && taskBaseName(t) !== "-");
 }
 
 function taskBaseName(task: string): string {
@@ -251,6 +254,7 @@ export default function AdminPage() {
   const [selectedTaskName, setSelectedTaskName] = useState<string | null>(null);
   const [selectedTaskDetail, setSelectedTaskDetail] = useState<TaskDetail | null>(null);
   const [taskDetailLoading, setTaskDetailLoading] = useState(false);
+  const [resettingTasks, setResettingTasks] = useState(false);
 
   useEffect(() => {
     const session = loadSession();
@@ -348,6 +352,25 @@ export default function AdminPage() {
       setMessage(err?.message || "Failed to create report.");
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function handleResetRecurringTasks() {
+    setResettingTasks(true);
+    setMessage(null);
+
+    try {
+      const res = await fetch("/api/tasks/reset-recurring", { method: "POST" });
+      const json = await res.json();
+      if (!res.ok) {
+        throw new Error(json.error || "Failed to reset recurring tasks");
+      }
+      const count = json.updated ?? 0;
+      setMessage(`Reset ${count} recurring tasks to Not Started.`);
+    } catch (err: any) {
+      setMessage(err?.message || "Failed to reset recurring tasks.");
+    } finally {
+      setResettingTasks(false);
     }
   }
 
@@ -577,14 +600,27 @@ export default function AdminPage() {
               Generate archive-ready reports for the selected schedule and browse recent ones below.
             </p>
           </div>
-          <button
-            type="button"
-            disabled={!authorized || loading}
-            onClick={handleCreateReport}
-            className="rounded-md bg-[#a0b764] px-4 py-2 text-sm font-semibold uppercase tracking-[0.12em] text-[#f9f9ec] shadow-md transition hover:bg-[#93a95d] disabled:opacity-50"
-          >
-            {loading ? "Creating…" : "Create Daily Report"}
-          </button>
+          <div className="flex flex-col items-stretch gap-2 md:items-end">
+            <button
+              type="button"
+              disabled={!authorized || loading}
+              onClick={handleCreateReport}
+              className="rounded-md bg-[#a0b764] px-4 py-2 text-sm font-semibold uppercase tracking-[0.12em] text-[#f9f9ec] shadow-md transition hover:bg-[#93a95d] disabled:opacity-50"
+            >
+              {loading ? "Creating…" : "Create Daily Report"}
+            </button>
+            <button
+              type="button"
+              disabled={!authorized || resettingTasks}
+              onClick={handleResetRecurringTasks}
+              className="rounded-md border border-[#d0c9a4] bg-white px-4 py-2 text-xs font-semibold uppercase tracking-[0.12em] text-[#3f4b29] shadow-sm transition hover:bg-[#f1edd8] disabled:opacity-50"
+            >
+              {resettingTasks ? "Resetting…" : "Reset Recurring Tasks"}
+            </button>
+            <p className="text-[11px] text-[#7a7f54] text-right">
+              Clears completed recurring tasks back to Not Started.
+            </p>
+          </div>
         </div>
         <div className="mt-4 grid gap-4 md:grid-cols-2">
           <div className="rounded-lg bg-[#f6f1dd] p-4 text-sm text-[#4b5133]">

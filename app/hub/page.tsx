@@ -17,6 +17,7 @@ type ScheduleResponse = {
   cells: string[][];
   scheduleDate?: string;
   reportTime?: string;
+  taskResetTime?: string;
   message?: string;
 };
 
@@ -148,7 +149,11 @@ function splitCellTasks(cell: string): string[] {
     .split(",")
     .map((t) => t.trim())
     .filter(Boolean)
-    .map((t) => (note ? `${t}\n${note}` : t));
+    .map((t) => (note ? `${t}\n${note}` : t))
+    .filter((t) => {
+      const base = taskBaseName(t);
+      return base && base !== "-";
+    });
 }
 
 function taskBaseName(task: string): string {
@@ -270,12 +275,32 @@ export default function HubSchedulePage() {
     );
   }, [scheduleDateObj]);
 
+  const isScheduleYesterday = useMemo(() => {
+    if (!scheduleDateObj) return false;
+    const today = new Date();
+    const target = new Date(scheduleDateObj);
+    today.setHours(0, 0, 0, 0);
+    target.setHours(0, 0, 0, 0);
+    const diffDays =
+      (today.getTime() - target.getTime()) / (1000 * 60 * 60 * 24);
+    return diffDays === 1;
+  }, [scheduleDateObj]);
+
   const scheduleTitle = scheduleDateLabel
     ? isScheduleToday
-      ? "Todays Schedule"
-      : `${scheduleDateLabel} Schedule`
-    : "Todays Schedule";
+      ? `Today's Schedule ${scheduleDateLabel}`
+      : isScheduleYesterday
+        ? `Yesterday's Schedule ${scheduleDateLabel}`
+        : `${scheduleDateLabel} Schedule`
+    : "Today's Schedule";
   const scheduleOutdated = Boolean(scheduleDateLabel && !isScheduleToday);
+  const scheduleOutdatedMessage = useMemo(() => {
+    if (!scheduleOutdated) return null;
+    if (isScheduleYesterday) {
+      return "This is yesterday's schedule. Confirm timing before starting.";
+    }
+    return "This schedule date is not today. Please confirm timing before starting.";
+  }, [isScheduleYesterday, scheduleOutdated]);
 
   async function ensureAnimalsLoaded() {
     if (animalsLoaded || animalFetchInFlight.current) return;
@@ -628,18 +653,15 @@ export default function HubSchedulePage() {
     [data]
   );
 
-  const standardWorkSlots = useMemo(
-    () =>
-      workSlots.filter(
-        (slot) => !/evening/i.test(slot.label) && !/weekend/i.test(slot.label)
-      ),
+  const weekdayWorkSlots = useMemo(
+    () => workSlots.filter((slot) => !/weekend/i.test(slot.label)),
     [workSlots]
   );
 
-  const hasStandardScheduleContent = useMemo(() => {
-    if (!data || standardWorkSlots.length === 0) return false;
+  const hasWeekdayScheduleContent = useMemo(() => {
+    if (!data || weekdayWorkSlots.length === 0) return false;
 
-    const slotIndexes = standardWorkSlots
+    const slotIndexes = weekdayWorkSlots
       .map((slot) => data.slots.findIndex((s) => s.id === slot.id))
       .filter((idx) => idx >= 0);
 
@@ -651,10 +673,10 @@ export default function HubSchedulePage() {
         return splitCellTasks(cell).length > 0;
       })
     );
-  }, [data, standardWorkSlots]);
+  }, [data, weekdayWorkSlots]);
 
   const showStandardSection =
-    !isExternalVolunteer && (loading || error || hasStandardScheduleContent);
+    !isExternalVolunteer && (loading || error || hasWeekdayScheduleContent);
 
   const scheduleDataForView = useMemo(() => {
     if (!data) return null;
@@ -746,34 +768,15 @@ export default function HubSchedulePage() {
     [combineSlotAssignments, weekendSlots]
   );
 
-  const userHasTasksForSlots = useCallback(
-    (slots: Slot[]) => {
-      if (!data || !currentUserName) return false;
-
-      const me = currentUserName.trim().toLowerCase();
-      const rowIdx = data.people.findIndex(
-        (person) => person.trim().toLowerCase() === me
-      );
-
-      if (rowIdx === -1) return false;
-
-      return slots.some((slot) => {
-        const slotIdx = data.slots.findIndex((s) => s.id === slot.id);
-        if (slotIdx === -1) return false;
-
-        const cell = (data.cells[rowIdx]?.[slotIdx] ?? "").trim();
-        return splitCellTasks(cell).length > 0;
-      });
-    },
-    [data, currentUserName]
+  const eveningHasContent = eveningCombined.some(
+    (cell) => cell.tasks.length > 0 || cell.names.length > 0
+  );
+  const weekendHasContent = weekendCombined.some(
+    (cell) => cell.tasks.length > 0 || cell.names.length > 0
   );
 
-  const showEveningSection =
-    !isExternalVolunteer &&
-    eveningCombined.length > 0 &&
-    userHasTasksForSlots(eveningSlots);
-  const showWeekendSection =
-    weekendCombined.length > 0 && userHasTasksForSlots(weekendSlots);
+  const showEveningSection = !isExternalVolunteer && eveningHasContent;
+  const showWeekendSection = weekendHasContent;
 
   const myTasks = useMemo(() => {
     if (!data || !currentUserName) return [] as {
@@ -1114,7 +1117,7 @@ async function handleTaskClick(taskPayload: TaskClickPayload) {
         {!loading &&
           data?.message &&
           !isExternalVolunteer &&
-          !hasStandardScheduleContent && (
+          !hasWeekdayScheduleContent && (
             <div className="rounded-lg border border-[#e4dcb8] bg-white/80 px-4 py-3 text-sm text-[#6a6748]">
               {data.message}
             </div>
@@ -1175,11 +1178,11 @@ async function handleTaskClick(taskPayload: TaskClickPayload) {
             </h2>
             <p className="text-sm text-[#7a7f54]">
               Click any task to see its details, description, and who you are
-              assigned with.
+              assigned with. Evening shift columns now sit beside the daytime schedule for a single view.
             </p>
-            {scheduleOutdated && !loading ? (
+            {scheduleOutdated && !loading && scheduleOutdatedMessage ? (
               <p className="mt-1 text-xs font-semibold text-red-700">
-                This schedule date is not today. Please confirm timing before starting.
+                {scheduleOutdatedMessage}
               </p>
             ) : null}
             {data?.message && !loading && (
@@ -1236,7 +1239,7 @@ async function handleTaskClick(taskPayload: TaskClickPayload) {
                 {!loading &&
                   !error &&
                   scheduleDataToRender &&
-                  standardWorkSlots.length > 0 &&
+                  weekdayWorkSlots.length > 0 &&
                   activeView === "schedule" && (
                     <>
                       <div className="relative">
@@ -1264,7 +1267,7 @@ async function handleTaskClick(taskPayload: TaskClickPayload) {
                         >
                           <ScheduleGrid
                             data={scheduleDataToRender}
-                            workSlots={standardWorkSlots}
+                            workSlots={weekdayWorkSlots}
                             currentUserName={currentUserName}
                             currentSlotId={currentSlotId}
                             onTaskClick={handleTaskClick}
@@ -1294,7 +1297,7 @@ async function handleTaskClick(taskPayload: TaskClickPayload) {
                 {!loading &&
                   !error &&
                   data &&
-                  standardWorkSlots.length === 0 &&
+                  weekdayWorkSlots.length === 0 &&
                   activeView === "schedule" && (
                   <div className="px-4 py-6 text-sm text-center text-[#7a7f54]">
                     No work slots defined in this schedule.
@@ -1317,178 +1320,30 @@ async function handleTaskClick(taskPayload: TaskClickPayload) {
           !error &&
           data &&
           showEveningSection && (
-            <section className="space-y-3">
-              <h3 className="text-xl font-semibold tracking-[0.16em] uppercase text-[#5d7f3b]">
-                Evening Schedule
-              </h3>
-              <p className="text-sm text-[#7a7f54]">
-                Section for anyone assigned to Evening Shift, task can be completed anytime between 5:30 PM to 10 PM
-              </p>
-              <div className="rounded-lg bg-[#a0b764] px-3 py-3">
-                <div className="rounded-md bg-[#f8f4e3] overflow-x-auto">
-                  <table className="min-w-full table-auto border-collapse">
-                    <thead>
-                      <tr>
-                        {eveningCombined.map((cell) => (
-                          <th
-                            key={cell.slot.id}
-                            className="border border-[#e2d7b5] px-3 py-2 text-left text-xs uppercase tracking-[0.12em] text-[#6f7a40]"
-                          >
-                            <div className="flex flex-col gap-1">
-                              <span className="font-semibold text-[#42502d]">{cell.slot.label}</span>
-                              {cell.slot.timeRange && (
-                                <span className="text-[11px] text-[#8a8256]">{cell.slot.timeRange}</span>
-                              )}
-                            </div>
-                          </th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      <tr>
-                        {eveningCombined.map((cell) => (
-                          <td
-                            key={cell.slot.id}
-                            className="align-top border border-[#e2d7b5] px-3 py-3"
-                          >
-                            <div className="space-y-2">
-                              <p className="text-xs text-[#5d7f3b] font-semibold">
-                                Assigned: {cell.names.length ? cell.names.join(", ") : "No one yet"}
-                              </p>
-                              <div className="flex flex-wrap gap-2">
-                                {cell.tasks.length === 0 && (
-                                  <span className="text-xs italic text-[#7a7f54]">No tasks listed</span>
-                                )}
-                                {cell.tasks.map((task) => {
-                                  const participants =
-                                    task.people.length > 0 ? task.people : cell.names;
-                                  const primaryPerson = participants[0] || "Team";
-                                  const meta =
-                                    taskMetaMap[taskBaseName(task.task)];
-                                  const typeClass = typeColorClasses(
-                                    meta?.typeColor
-                                  );
-
-                                  return (
-                                    <button
-                                      key={`${cell.slot.id}-${task.task}`}
-                                      type="button"
-                                      onClick={() =>
-                                        handleTaskClick({
-                                          person: primaryPerson,
-                                          slot: cell.slot,
-                                          task: task.task,
-                                          groupNames: participants,
-                                        })
-                                      }
-                                      className={`rounded-md border px-3 py-2 text-left shadow-sm hover:shadow transition text-xs ${typeClass}`}
-                                    >
-                                      <div className="font-semibold text-[#42502d]">{task.task}</div>
-                                      <div className="text-[11px] text-[#7a7f54]">
-                                        {participants.length ? participants.join(", ") : "No names yet"}
-                                      </div>
-                                    </button>
-                                  );
-                                })}
-                              </div>
-                            </div>
-                          </td>
-                        ))}
-                      </tr>
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            </section>
+            <ShiftBoard
+              title="Evening Schedule"
+              description="Evening shift tasks that can be completed between 5:30 PM and 10:00 PM."
+              combined={eveningCombined}
+              onTaskClick={handleTaskClick}
+              taskMetaMap={taskMetaMap}
+              statusColors={statusColorLookup}
+              currentUserName={currentUserName}
+            />
           )}
 
         {!loading &&
           !error &&
           data &&
           showWeekendSection && (
-            <section className="space-y-3">
-              <h3 className="text-xl font-semibold tracking-[0.16em] uppercase text-[#5d7f3b]">
-                Weekend Schedule
-              </h3>
-              <p className="text-sm text-[#7a7f54]">
-                Section for anyone assgined to the Weekend Shift, task can be completed anytime wiithin the specified itme ranges below.
-              </p>
-              <div className="rounded-lg bg-[#a0b764] px-3 py-3">
-                <div className="rounded-md bg-[#f8f4e3] overflow-x-auto">
-                  <table className="min-w-full table-auto border-collapse">
-                    <thead>
-                      <tr>
-                        {weekendCombined.map((cell) => (
-                          <th
-                            key={cell.slot.id}
-                            className="border border-[#e2d7b5] px-3 py-2 text-left text-xs uppercase tracking-[0.12em] text-[#6f7a40]"
-                          >
-                            <div className="flex flex-col gap-1">
-                              <span className="font-semibold text-[#42502d]">{cell.slot.label}</span>
-                              {cell.slot.timeRange && (
-                                <span className="text-[11px] text-[#8a8256]">{cell.slot.timeRange}</span>
-                              )}
-                            </div>
-                          </th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      <tr>
-                        {weekendCombined.map((cell) => (
-                          <td
-                            key={cell.slot.id}
-                            className="align-top border border-[#e2d7b5] px-3 py-3"
-                          >
-                            <div className="space-y-2">
-                              <p className="text-xs text-[#5d7f3b] font-semibold">
-                                Assigned: {cell.names.length ? cell.names.join(", ") : "No one yet"}
-                              </p>
-                              <div className="flex flex-wrap gap-2">
-                                {cell.tasks.length === 0 && (
-                                  <span className="text-xs italic text-[#7a7f54]">No tasks listed</span>
-                                )}
-                                {cell.tasks.map((task) => {
-                                  const participants =
-                                    task.people.length > 0 ? task.people : cell.names;
-                                  const primaryPerson = participants[0] || "Team";
-                                  const meta =
-                                    taskMetaMap[taskBaseName(task.task)];
-                                  const typeClass = typeColorClasses(
-                                    meta?.typeColor
-                                  );
-
-                                  return (
-                                    <button
-                                      key={`${cell.slot.id}-${task.task}`}
-                                      type="button"
-                                      onClick={() =>
-                                        handleTaskClick({
-                                          person: primaryPerson,
-                                          slot: cell.slot,
-                                          task: task.task,
-                                          groupNames: participants,
-                                        })
-                                      }
-                                      className={`rounded-md border px-3 py-2 text-left shadow-sm hover:shadow transition text-xs ${typeClass}`}
-                                    >
-                                      <div className="font-semibold text-[#42502d]">{task.task}</div>
-                                      <div className="text-[11px] text-[#7a7f54]">
-                                        {participants.length ? participants.join(", ") : "No names yet"}
-                                      </div>
-                                    </button>
-                                  );
-                                })}
-                              </div>
-                            </div>
-                          </td>
-                        ))}
-                      </tr>
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            </section>
+            <ShiftBoard
+              title="Weekend Schedule"
+              description="Weekend shift coverage. Tasks can be completed within the listed time ranges."
+              combined={weekendCombined}
+              onTaskClick={handleTaskClick}
+              taskMetaMap={taskMetaMap}
+              statusColors={statusColorLookup}
+              currentUserName={currentUserName}
+            />
           )}
 
         {isExternalVolunteer &&
@@ -2095,6 +1950,196 @@ function getMealIcon(label: string): string {
   return "🍽️";
 }
 
+function ShiftBoard({
+  title,
+  description,
+  combined,
+  onTaskClick,
+  taskMetaMap,
+  statusColors,
+  currentUserName,
+}: {
+  title: string;
+  description: string;
+  combined: { slot: Slot; names: string[]; tasks: { task: string; people: string[] }[] }[];
+  onTaskClick?: (payload: TaskClickPayload) => void;
+  taskMetaMap: Record<string, TaskMeta>;
+  statusColors: Record<string, string>;
+  currentUserName?: string | null;
+}) {
+  const hasTasks = combined.some((cell) => cell.tasks.length > 0);
+  const normalizedUser = (currentUserName || "").toLowerCase().trim();
+
+  return (
+    <section className="space-y-3">
+      <div className="flex flex-col gap-1">
+        <h3 className="text-xl font-semibold tracking-[0.16em] uppercase text-[#5d7f3b]">
+          {title}
+        </h3>
+        <p className="text-sm text-[#7a7f54]">{description}</p>
+      </div>
+
+      <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
+        {combined.map((cell) => (
+          <div
+            key={cell.slot.id}
+            className="rounded-lg border border-[#d0c9a4] bg-white/85 shadow-sm"
+          >
+            <div className="flex items-start justify-between gap-2 border-b border-[#e2d7b5] bg-[#f4f1df] px-4 py-3">
+              <div className="flex flex-col">
+                <span className="text-sm font-semibold text-[#42502d]">
+                  {cell.slot.label}
+                </span>
+                {cell.slot.timeRange && (
+                  <span className="text-[11px] text-[#8a8256]">
+                    {cell.slot.timeRange}
+                  </span>
+                )}
+              </div>
+              <span className="rounded-full bg-[#eef2d9] px-2 py-[2px] text-[10px] font-semibold uppercase tracking-[0.12em] text-[#4f5730]">
+                {cell.tasks.length} {cell.tasks.length === 1 ? "task" : "tasks"}
+              </span>
+            </div>
+
+            <div className="px-4 py-3 space-y-3">
+              <div className="flex flex-wrap gap-2">
+                {cell.names.length ? (
+                  cell.names.map((name) => (
+                    <span
+                      key={name}
+                      className="inline-flex items-center rounded-full bg-[#eef5dd] px-3 py-1 text-[12px] font-semibold text-[#42502d]"
+                    >
+                      {name}
+                    </span>
+                  ))
+                ) : (
+                  <span className="text-[11px] italic text-[#7a7f54]">
+                    No one assigned yet.
+                  </span>
+                )}
+              </div>
+
+              <div className="space-y-2">
+                {cell.tasks.length === 0 ? (
+                  <p className="text-[11px] italic text-[#7a7f54]">
+                    No tasks listed for this block.
+                  </p>
+                ) : (
+                  cell.tasks.map((task) => {
+                    const participants =
+                      task.people.length > 0 ? task.people : cell.names;
+                    const primaryPerson = participants[0] || "Team";
+                    const includesUser = normalizedUser
+                      ? participants.some((p) => p.toLowerCase() === normalizedUser)
+                      : false;
+                    const meta = taskMetaMap[taskBaseName(task.task)];
+                    const status = meta?.status;
+                    const typeClass = typeColorClasses(meta?.typeColor);
+
+                    return (
+                      <button
+                        key={`${cell.slot.id}-${task.task}`}
+                        type="button"
+                        onClick={() =>
+                          onTaskClick?.({
+                            person: primaryPerson,
+                            slot: cell.slot,
+                            task: task.task,
+                            groupNames: participants,
+                          })
+                        }
+                        className={`w-full rounded-md border px-3 py-2 text-left shadow-sm transition hover:shadow ${typeClass} ${
+                          includesUser ? "ring-2 ring-[#d2e4a0]" : ""
+                        }`}
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <div>
+                            <div className="font-semibold text-[#42502d]">
+                              {task.task}
+                            </div>
+                            <div className="text-[11px] text-[#7a7f54] space-y-1">
+                              <div className="flex flex-wrap gap-1">
+                                {participants.length
+                                  ? participants.map((p) => {
+                                      const isMe =
+                                        normalizedUser &&
+                                        p.toLowerCase() === normalizedUser;
+                                      return (
+                                        <span
+                                          key={p}
+                                          className={`rounded-full px-2 py-[2px] text-[11px] font-semibold ${
+                                            isMe
+                                              ? "bg-[#a0b764] text-white"
+                                              : "bg-[#eef2d9] text-[#3f4b29]"
+                                          }`}
+                                        >
+                                          {isMe ? `${p} (you)` : p}
+                                        </span>
+                                      );
+                                    })
+                                  : "No names yet"}
+                              </div>
+                              {includesUser && (
+                                <span className="inline-flex items-center rounded-full bg-[#f1edd8] px-2 py-[1px] text-[10px] font-semibold text-[#4f4b33]">
+                                  You&apos;re on this task
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                          <StatusBadge
+                            status={status}
+                            color={statusColors[status || ""]}
+                          />
+                        </div>
+                      </button>
+                    );
+                  })
+                )}
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {!hasTasks && (
+        <p className="text-sm text-[#7a7f54] italic">
+          No tasks listed for this shift yet.
+        </p>
+      )}
+
+      {normalizedUser && (
+        <div className="rounded-lg border border-dashed border-[#d0c9a4] bg-[#f9f6e7] px-3 py-2 text-[12px] text-[#4f4b33]">
+          {(() => {
+            const userTasks = combined
+              .map((cell) => ({
+                slot: cell.slot,
+                tasks: cell.tasks.filter((t) =>
+                  t.people.some((p) => p.toLowerCase() === normalizedUser)
+                ),
+              }))
+              .filter((entry) => entry.tasks.length > 0);
+
+            if (!userTasks.length) {
+              return "You have no assignments in this shift.";
+            }
+
+            return (
+              <ul className="list-disc space-y-1 pl-4">
+                {userTasks.map((entry) => (
+                  <li key={entry.slot.id}>
+                    <span className="font-semibold">{entry.slot.label}</span>:{" "}
+                    {entry.tasks.map((t) => taskBaseName(t.task)).join(", ")}
+                  </li>
+                ))}
+              </ul>
+            );
+          })()}
+        </div>
+      )}
+    </section>
+  );
+}
+
 function StatusBadge({ status, color }: { status?: string; color?: string }) {
   if (!status) return null;
 
@@ -2442,7 +2487,7 @@ function ScheduleGrid({
     <table className="w-full min-w-[720px] border-collapse text-xs">
       <thead>
         <tr className="bg-[#e5e7c5]">
-          <th className="border border-[#d1d4aa] px-3 py-2 text-left w-40 text-[11px] font-semibold uppercase tracking-[0.12em] text-[#5d7f3b]">
+          <th className="border border-[#d1d4aa] px-3 py-2 text-left w-40 text-[11px] font-semibold uppercase tracking-[0.12em] text-[#5d7f3b] sticky left-0 z-20 bg-[#e5e7c5]">
             Person
           </th>
           {workSlots.map((slot) => {
@@ -2490,7 +2535,7 @@ function ScheduleGrid({
                 visualRow % 2 === 0 ? "bg-[#faf8ea]" : "bg-[#f4f2df]"
               }
             >
-              <td className="border border-[#d1d4aa] px-3 py-2 align-top">
+              <td className="border border-[#d1d4aa] px-3 py-2 align-top sticky left-0 z-10 bg-[#f7f6e8]">
                 <span
                   className={
                     "text-sm " +

@@ -3,10 +3,12 @@ import {
   createPageInDatabase,
   createPageUnderPage,
   listAllBlockChildren,
+  queryAllDatabasePages,
   queryDatabase,
   retrieveComments,
   retrieveDatabase,
   retrievePage,
+  updatePage,
 } from "@/lib/notion";
 import { loadScheduleData, Slot } from "@/lib/schedule-loader";
 
@@ -17,6 +19,9 @@ const TASK_NAME_PROPERTY_KEY = "Name";
 const TASK_STATUS_PROPERTY_KEY = "Status";
 const TASK_DESC_PROPERTY_KEY = "Description";
 const TASK_NOTES_PROPERTY_KEY = "Extra Notes";
+const TASK_RECURRING_PROPERTY_KEY = "Recurring";
+const COMPLETED_STATUS = "Completed";
+const RESET_STATUS = "Not Started";
 
 type RichTextNode = { plain: string; href?: string; annotations?: any };
 type ReportBlock = {
@@ -162,16 +167,8 @@ function baseTaskName(task: string) {
   return (task || "").split("\n")[0].trim();
 }
 
-function formatHawaiiTime(dateInput?: string) {
-  if (!dateInput) return "";
-  const dt = new Date(dateInput);
-  if (Number.isNaN(dt.getTime())) return "";
-  return dt.toLocaleTimeString("en-US", {
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-    timeZone: "Pacific/Honolulu",
-  });
+function isOffPlaceholder(task: string) {
+  return baseTaskName(task) === "-";
 }
 
 function toIso(dateLabel?: string) {
@@ -366,8 +363,17 @@ async function createReportFromSchedule(schedule: any) {
     schedule.cells
   );
 
+  // Filter out "-" placeholders before doing any heavy work.
+  const filteredAssignments = assignments.filter(
+    (a) => a.taskName && !isOffPlaceholder(a.taskName)
+  );
+
   const uniqueTasks = Array.from(
-    new Set(assignments.map((a) => baseTaskName(a.taskName)).filter(Boolean))
+    new Set(
+      filteredAssignments
+        .map((a) => baseTaskName(a.taskName))
+        .filter(Boolean)
+    )
   );
 
   const taskDetails = new Map<string, TaskDetail | null>();
@@ -388,15 +394,17 @@ async function createReportFromSchedule(schedule: any) {
   const children: any[] = [
     heading(`Daily Report — ${scheduleLabel}`, 2),
     paragraph(
-      `Generated ${new Date().toLocaleString()} with ${assignments.length} assignments.`
+      `Generated ${new Date().toLocaleString()} with ${filteredAssignments.length} assignments.`
     ),
   ];
 
-  if (assignments.length === 0) {
+  if (filteredAssignments.length === 0) {
     children.push(paragraph("No assignments were recorded for this schedule."));
   } else {
     schedule.slots.forEach((slot: Slot) => {
-      const slotAssignments = assignments.filter((a) => a.slot.id === slot.id);
+      const slotAssignments = filteredAssignments.filter(
+        (a) => a.slot.id === slot.id
+      );
       if (!slotAssignments.length) return;
 
       children.push(
@@ -471,6 +479,85 @@ async function createReportFromSchedule(schedule: any) {
     : await createPageUnderPage(REPORTS_DB_ID, properties, children);
 
   return page;
+}
+
+function hawaiiNowMinutes(): number {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+    timeZone: "Pacific/Honolulu",
+  }).formatToParts(new Date());
+
+  const hour = Number(parts.find((p) => p.type === "hour")?.value || 0);
+  const minute = Number(parts.find((p) => p.type === "minute")?.value || 0);
+  return hour * 60 + minute;
+}
+
+function parseTimeToMinutes(label?: string | null): number | null {
+  if (!label) return null;
+  const trimmed = label.trim();
+  if (!trimmed) return null;
+
+  const match = trimmed.match(
+    /^(\d{1,2})(?::(\d{2}))?\s*(am|pm)?$/i
+  );
+  if (!match) return null;
+
+  let hours = Number(match[1]);
+  const minutes = Number(match[2] || "0");
+  const ampm = match[3]?.toLowerCase();
+
+  if (ampm === "pm" && hours < 12) hours += 12;
+  if (ampm === "am" && hours === 12) hours = 0;
+
+  return hours * 60 + minutes;
+}
+
+function isWithinWindow(
+  targetTime?: string | null,
+  windowMinutes = 10
+): boolean {
+  const targetMinutes = parseTimeToMinutes(targetTime);
+  if (targetMinutes === null) return true;
+
+  const now = hawaiiNowMinutes();
+  let diff = Math.abs(now - targetMinutes);
+  if (diff > 720) {
+    diff = 1440 - diff; // wraparound near midnight
+  }
+  return diff <= windowMinutes;
+}
+
+async function resetRecurringTasks() {
+  try {
+    const data = await queryAllDatabasePages(TASKS_DB_ID, {
+      filter: {
+        and: [
+          {
+            property: TASK_STATUS_PROPERTY_KEY,
+            select: { equals: COMPLETED_STATUS },
+          },
+          {
+            property: TASK_RECURRING_PROPERTY_KEY,
+            checkbox: { equals: true },
+          },
+        ],
+      },
+    });
+
+    const pages = data.results || [];
+    for (const page of pages) {
+      await updatePage(page.id, {
+        [TASK_STATUS_PROPERTY_KEY]: { select: { name: RESET_STATUS } },
+      });
+    }
+
+    return { updated: pages.length };
+  } catch (err) {
+    console.error("Failed to reset recurring tasks:", err);
+    return { updated: 0, error: true };
+  }
 }
 
 export async function GET(req: Request) {
@@ -576,18 +663,38 @@ export async function GET(req: Request) {
     return NextResponse.json({ status: "no-schedule" });
   }
 
+  const resetWindowMatch =
+    !!schedule.taskResetTime && isWithinWindow(schedule.taskResetTime, 15);
+  const resetResult = resetWindowMatch ? await resetRecurringTasks() : null;
+
+  const reportWindowMatch = isWithinWindow(schedule.reportTime, 15);
+  if (!reportWindowMatch) {
+    return NextResponse.json({
+      status: "skipped-window",
+      reason: "Outside configured report time window",
+      taskResets: resetResult?.updated ?? 0,
+    });
+  }
+
   const parentInfo = await resolveReportsParent();
   const scheduleLabel = schedule.scheduleDate || new Date().toLocaleDateString();
 
   const reportAlready = await reportExists(scheduleLabel, parentInfo);
   if (reportAlready) {
-    return NextResponse.json({ status: "exists" });
+    return NextResponse.json({
+      status: "exists",
+      taskResets: resetResult?.updated ?? 0,
+    });
   }
 
 
   try {
     const page = await createReportFromSchedule(schedule);
-    return NextResponse.json({ status: "created", pageId: page.id });
+    return NextResponse.json({
+      status: "created",
+      pageId: page.id,
+      taskResets: resetResult?.updated ?? 0,
+    });
   } catch (err) {
     console.error("Auto report creation failed:", err);
     return NextResponse.json(

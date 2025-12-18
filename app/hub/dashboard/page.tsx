@@ -17,6 +17,8 @@ type ScheduleResponse = {
   slots: Slot[];
   cells: string[][];
   scheduleDate?: string;
+  reportTime?: string;
+  taskResetTime?: string;
 };
 
 type MiniTask = {
@@ -51,6 +53,11 @@ const quickLinks = [
     icon: "📘",
   },
 ];
+
+function isOffPlaceholder(task: string) {
+  const base = task.split("\n")[0].trim();
+  return base === "-";
+}
 
 export default function WorkDashboardPage() {
   const router = useRouter();
@@ -106,7 +113,8 @@ export default function WorkDashboardPage() {
             .split(",")
             .map((t) => t.trim())
             .filter(Boolean)
-            .map((t) => (note ? `${t}\n${note}` : t));
+            .map((t) => (note ? `${t}\n${note}` : t))
+            .filter((entry) => !isOffPlaceholder(entry));
           entries.forEach((entry) => {
             tasks.push({
               slot: slot.label,

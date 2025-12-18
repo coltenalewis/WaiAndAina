@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { saveSession, UserSession } from "@/lib/session";
@@ -23,6 +23,11 @@ function OnboardingContent() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const [capabilityOptions, setCapabilityOptions] = useState<string[]>([]);
+  const [selectedCapabilities, setSelectedCapabilities] = useState<string[]>([]);
+  const [capabilityError, setCapabilityError] = useState<string | null>(null);
+  const [capabilityLoading, setCapabilityLoading] = useState(false);
+  const lastFetchedName = useRef<string>("");
 
   const presetName = searchParams.get("name") || "";
   const isNameLocked = !!presetName;
@@ -31,6 +36,39 @@ function OnboardingContent() {
       setSelectedName(presetName);
     }
   }, [presetName]);
+
+  async function loadCapabilities(nameValue: string) {
+    setCapabilityLoading(true);
+    setCapabilityError(null);
+    try {
+      const search = nameValue ? `?name=${encodeURIComponent(nameValue)}` : "";
+      const res = await fetch(`/api/user-settings${search}`);
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status}`);
+      }
+      const json = await res.json();
+      setCapabilityOptions(json.capabilityOptions || []);
+      if (Array.isArray(json.capabilities)) {
+        setSelectedCapabilities(json.capabilities);
+      }
+      lastFetchedName.current = nameValue;
+    } catch (err) {
+      console.error("Failed to load capabilities", err);
+      setCapabilityError("Unable to load capabilities right now.");
+    } finally {
+      setCapabilityLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    loadCapabilities(presetName || "");
+  }, [presetName]);
+
+  useEffect(() => {
+    const trimmed = selectedName.trim();
+    if (!trimmed || trimmed === lastFetchedName.current) return;
+    loadCapabilities(trimmed);
+  }, [selectedName]);
 
   const canSubmit = useMemo(() => {
     const nameValue = selectedName.trim();
@@ -60,6 +98,7 @@ function OnboardingContent() {
           name: nameValue,
           currentPassword: DEFAULT_PASSCODE,
           newPassword: newPass,
+          capabilities: selectedCapabilities,
         }),
       });
 
@@ -97,6 +136,14 @@ function OnboardingContent() {
     } finally {
       setSubmitting(false);
     }
+  }
+
+  function toggleCapability(capability: string) {
+    setSelectedCapabilities((prev) =>
+      prev.includes(capability)
+        ? prev.filter((c) => c !== capability)
+        : [...prev, capability]
+    );
   }
 
   return (
@@ -181,6 +228,57 @@ function OnboardingContent() {
                     placeholder="Re-enter passcode"
                   />
                 </div>
+              </div>
+
+              <div className="space-y-2 rounded-lg border border-[#e2d7b5] bg-[#f9f6e7] px-4 py-3">
+                <div className="flex items-center justify-between gap-2">
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#6b6f4c]">
+                      Capabilities
+                    </p>
+                    <p className="text-[12px] text-[#6f754f]">
+                      Choose everything you can confidently help with. You can edit this anytime in Settings.
+                    </p>
+                  </div>
+                  {capabilityLoading && (
+                    <span className="text-[11px] text-[#7a7f54]">Loading…</span>
+                  )}
+                </div>
+                {capabilityError && (
+                  <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-[11px] text-red-700">
+                    {capabilityError}
+                  </div>
+                )}
+                <div className="flex flex-wrap gap-2">
+                  {capabilityOptions.length === 0 && !capabilityLoading ? (
+                    <span className="text-[11px] text-[#7a7f54] italic">
+                      No capabilities available yet.
+                    </span>
+                  ) : (
+                    capabilityOptions.map((cap) => {
+                      const active = selectedCapabilities.includes(cap);
+                      return (
+                        <button
+                          key={cap}
+                          type="button"
+                          onClick={() => toggleCapability(cap)}
+                          className={`rounded-full border px-3 py-1 text-[12px] font-semibold shadow-sm transition ${
+                            active
+                              ? "border-[#8fae4c] bg-[#a0b764] text-white"
+                              : "border-[#d0c9a4] bg-white text-[#4f5730] hover:bg-[#f1edd8]"
+                          }`}
+                        >
+                          {cap}
+                        </button>
+                      );
+                    })
+                  )}
+                </div>
+                {selectedCapabilities.length > 0 && (
+                  <p className="text-[11px] text-[#6b6f4c]">
+                    Selected: {selectedCapabilities.join(", ")}
+                  </p>
+                )}
               </div>
 
               {error && (

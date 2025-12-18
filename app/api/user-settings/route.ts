@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { Client } from "@notionhq/client";
-import { queryDatabase } from "@/lib/notion";
+import { queryDatabase, retrieveDatabase } from "@/lib/notion";
 
 const USERS_DB_ID = process.env.NOTION_USERS_DATABASE_ID!;
 const NOTION_TOKEN = process.env.NOTION_TOKEN!;
@@ -9,6 +9,7 @@ const NOTION_TOKEN = process.env.NOTION_TOKEN!;
 const NAME_PROPERTY_KEY = "Name";    // title
 const PASSWORD_PROPERTY_KEY = "Password"; // rich_text
 const PHONE_PROPERTY_KEY = "Phone";    // phone_number
+const CAPABILITIES_PROPERTY_KEY = "Capabilities"; // multi_select
 
 const notion = new Client({ auth: NOTION_TOKEN });
 
@@ -39,6 +40,64 @@ function getPlainText(prop: any): string {
   }
 }
 
+function parseMultiSelect(prop: any): string[] {
+  if (!prop) return [];
+  if (prop.type === "multi_select") {
+    return (prop.multi_select || [])
+      .map((s: any) => s.name || "")
+      .filter(Boolean);
+  }
+  if (Array.isArray(prop.multi_select)) {
+    return prop.multi_select.map((s: any) => s.name || "").filter(Boolean);
+  }
+  return [];
+}
+
+export async function GET(req: Request) {
+  if (!USERS_DB_ID || !NOTION_TOKEN) {
+    return NextResponse.json(
+      { error: "Notion configuration missing" },
+      { status: 500 }
+    );
+  }
+
+  const { searchParams } = new URL(req.url);
+  const name = (searchParams.get("name") || "").trim();
+
+  try {
+    const dbMeta = await retrieveDatabase(USERS_DB_ID);
+    const capabilityOptions =
+      dbMeta?.properties?.[CAPABILITIES_PROPERTY_KEY]?.multi_select?.options?.map(
+        (opt: any) => opt?.name || ""
+      )?.filter(Boolean) || [];
+
+    let capabilities: string[] = [];
+    if (name) {
+      const result = await queryDatabase(USERS_DB_ID, {
+        page_size: 1,
+        filter: {
+          property: NAME_PROPERTY_KEY,
+          title: { equals: name },
+        },
+      });
+      const page = result.results?.[0];
+      if (page) {
+        capabilities = parseMultiSelect(
+          page.properties?.[CAPABILITIES_PROPERTY_KEY]
+        );
+      }
+    }
+
+    return NextResponse.json({ capabilityOptions, capabilities });
+  } catch (err) {
+    console.error("Failed to load capabilities", err);
+    return NextResponse.json(
+      { error: "Unable to load capabilities" },
+      { status: 500 }
+    );
+  }
+}
+
 export async function POST(req: Request) {
   if (!USERS_DB_ID || !NOTION_TOKEN) {
     return NextResponse.json(
@@ -52,6 +111,7 @@ export async function POST(req: Request) {
     currentPassword?: string;
     newPassword?: string | null;
     phone?: string | null;
+    capabilities?: string[] | null;
   };
 
   try {
@@ -63,7 +123,7 @@ export async function POST(req: Request) {
     );
   }
 
-  const { name, currentPassword, newPassword, phone } = body;
+  const { name, currentPassword, newPassword, phone, capabilities } = body;
 
   if (!name || !currentPassword) {
     return NextResponse.json(
@@ -121,6 +181,13 @@ export async function POST(req: Request) {
     if (typeof phone === "string") {
       properties[PHONE_PROPERTY_KEY] = {
         phone_number: phone.trim() || null,
+      };
+    }
+
+    if (Array.isArray(capabilities)) {
+      const cleaned = capabilities.map((c) => c.trim()).filter(Boolean);
+      properties[CAPABILITIES_PROPERTY_KEY] = {
+        multi_select: cleaned.map((nameValue) => ({ name: nameValue })),
       };
     }
 

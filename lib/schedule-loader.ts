@@ -21,6 +21,7 @@ export type ScheduleData = {
   cells: string[][];
   scheduleDate?: string;
   reportTime?: string;
+  taskResetTime?: string;
   message?: string;
 };
 
@@ -83,6 +84,33 @@ function formatScheduleDate(dateStr: string): string {
   return `${month}/${day}/${year}`;
 }
 
+function extractHawaiiTime(dateStr?: string): string {
+  if (!dateStr) return "";
+  const dt = new Date(dateStr);
+  if (Number.isNaN(dt.getTime())) return "";
+
+  const parts = new Intl.DateTimeFormat("en-US", {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+    timeZone: "Pacific/Honolulu",
+  }).formatToParts(dt);
+
+  const hour = parts.find((p) => p.type === "hour")?.value ?? "";
+  const minute = parts.find((p) => p.type === "minute")?.value ?? "";
+
+  if (!hour || !minute) return "";
+  return `${hour}:${minute}`;
+}
+
+function normalizeTaskValue(task: string): string {
+  const trimmed = task.trim();
+  if (!trimmed) return "";
+  const base = trimmed.split("\n")[0].trim();
+  if (base === "-") return "";
+  return trimmed;
+}
+
 export async function resolveScheduleDatabase() {
   try {
     const meta = await retrieveDatabase(SCHEDULE_DB_ID);
@@ -107,7 +135,7 @@ export async function resolveScheduleDatabase() {
 
   const settingsMeta = await retrieveDatabase(settingsDb.id);
   const titleKey = getTitlePropertyKey(settingsMeta);
-  const [settingsQuery, reportQuery] = await Promise.all([
+  const [settingsQuery, reportQuery, taskResetQuery] = await Promise.all([
     queryDatabase(settingsDb.id, {
       page_size: 1,
       filter: {
@@ -126,14 +154,29 @@ export async function resolveScheduleDatabase() {
         },
       },
     }),
+    queryDatabase(settingsDb.id, {
+      page_size: 1,
+      filter: {
+        property: titleKey,
+        title: {
+          equals: "Task Reset Time",
+        },
+      },
+    }),
   ]);
 
   const settingsRow = settingsQuery.results?.[0];
   const selectedDate = settingsRow?.properties?.["Selected Schedule"]?.date?.start;
 
   const reportRow = reportQuery.results?.[0];
-  const reportTimeValue =
-    reportRow?.properties?.["Auto update"]?.date?.start || "";
+  const reportTimeValue = extractHawaiiTime(
+    reportRow?.properties?.["Selected Schedule"]?.date?.start || ""
+  );
+
+  const taskResetRow = taskResetQuery.results?.[0];
+  const taskResetTime = extractHawaiiTime(
+    taskResetRow?.properties?.["Selected Schedule"]?.date?.start || ""
+  );
 
   if (!selectedDate) {
     throw new Error("Selected Schedule date is not configured in Notion");
@@ -155,6 +198,7 @@ export async function resolveScheduleDatabase() {
     databaseMeta,
     scheduleDate: formattedDate,
     reportTime: reportTimeValue,
+    taskResetTime,
   };
 }
 
@@ -232,7 +276,7 @@ export async function loadScheduleData(): Promise<ScheduleData> {
 
       for (const key of orderedKeys) {
         const prop = page.properties?.[key];
-        const task = getPlainText(prop);
+        const task = normalizeTaskValue(getPlainText(prop));
         rowTasks.push(task || "");
       }
 
@@ -245,6 +289,7 @@ export async function loadScheduleData(): Promise<ScheduleData> {
       cells,
       scheduleDate: resolution.scheduleDate,
       reportTime: resolution.reportTime,
+      taskResetTime: resolution.taskResetTime,
     };
   } catch (err) {
     const friendly = "No schedule has been assigned yet.";
