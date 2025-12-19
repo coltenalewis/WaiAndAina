@@ -4,6 +4,7 @@ import { ReactNode, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { clearSession, loadSession } from "@/lib/session";
+import { HubAssistantChat } from "@/components/HubAssistantChat";
 
 function notionColorToClasses(color?: string | null) {
   const map: Record<string, string> = {
@@ -89,6 +90,7 @@ export default function HubLayout({ children }: { children: ReactNode }) {
     ];
 
     if (isAdmin) {
+      links.push({ href: "/hub/admin/schedule", label: "Admin Schedule", icon: "🗂️" });
       links.push({ href: "/hub/admin", label: "Admin", icon: "🛠️" });
     }
 
@@ -246,48 +248,53 @@ export default function HubLayout({ children }: { children: ReactNode }) {
     workLinkHrefs.some(
       (href) => pathname === href || pathname.startsWith(`${href}/`)
     );
+  const assistantContext = useMemo(() => {
+    const workLabels = workLinks.map((link) => link.label).join(", ");
+    return `Hub path: ${pathname}. User type: ${userType || "unknown"}. Work links available: ${workLabels}.`;
+  }, [pathname, userType, workLinks]);
 
   return (
-    <main className="min-h-screen flex flex-col bg-[#f8f4e3] text-[#3b4224]">
-      {/* Header bar */}
-      <header className="w-full bg-[#a0b764] text-[#f9f9ec] shadow-md relative">
-        <div className="max-w-6xl mx-auto px-3 sm:px-4 py-2 sm:py-3 flex flex-col gap-2 sm:gap-3 sm:flex-row sm:items-center sm:justify-between">
-          {/* Top row on mobile: logo + toggles */}
-          <div className="flex items-center justify-between gap-3 w-full">
-            <div className="flex items-center gap-2 sm:hidden">
-              <button
-                onClick={() => setMobileMenuOpen(true)}
-                className="rounded-md border border-[#e5eacc]/60 bg-[#f4f7de]/90 px-2 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-[#56652f] hover:bg-white transition-colors shadow-sm"
-                aria-label="Open navigation"
-              >
-                ☰
-              </button>
-            </div>
-
-            {/* Center: logo + title */}
-            <div className="flex items-center gap-3 flex-1 sm:flex-none sm:justify-center">
-              <div className="h-9 w-9 rounded-full bg-[#f1e4b5] flex items-center justify-center shadow-sm">
-                <span className="text-xl">🐐</span>
+    <>
+      <main className="min-h-screen flex flex-col bg-[#f8f4e3] text-[#3b4224]">
+        {/* Header bar */}
+        <header className="w-full bg-[#a0b764] text-[#f9f9ec] shadow-md relative">
+          <div className="max-w-6xl mx-auto px-3 sm:px-4 py-2 sm:py-3 flex flex-col gap-2 sm:gap-3 sm:flex-row sm:items-center sm:justify-between">
+            {/* Top row on mobile: logo + toggles */}
+            <div className="flex items-center justify-between gap-3 w-full">
+              <div className="flex items-center gap-2 sm:hidden">
+                <button
+                  onClick={() => setMobileMenuOpen(true)}
+                  className="rounded-md border border-[#e5eacc]/60 bg-[#f4f7de]/90 px-2 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-[#56652f] hover:bg-white transition-colors shadow-sm"
+                  aria-label="Open navigation"
+                >
+                  ☰
+                </button>
               </div>
-              <div className="flex flex-col leading-tight">
-                <span className="text-xs sm:text-sm font-semibold tracking-[0.16em] uppercase">
-                  Wai &amp; Aina Homeapp
-                </span>
-                <span className="text-[10px] sm:text-[11px] text-[#f5f7eb]/90">
-                  Daily life &amp; schedule hub
-                </span>
+
+              {/* Center: logo + title */}
+              <div className="flex items-center gap-3 flex-1 sm:flex-none sm:justify-center">
+                <div className="h-9 w-9 rounded-full bg-[#f1e4b5] flex items-center justify-center shadow-sm">
+                  <span className="text-xl">🐐</span>
+                </div>
+                <div className="flex flex-col leading-tight">
+                  <span className="text-xs sm:text-sm font-semibold tracking-[0.16em] uppercase">
+                    Wai &amp; Aina Homeapp
+                  </span>
+                  <span className="text-[10px] sm:text-[11px] text-[#f5f7eb]/90">
+                    Daily life &amp; schedule hub
+                  </span>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2 sm:hidden">
+                <button
+                  onClick={handleLogout}
+                  className="rounded-md border border-[#e5eacc]/60 bg-[#f4f7de]/90 px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-[#56652f] hover:bg-white transition-colors"
+                >
+                  Logout
+                </button>
               </div>
             </div>
-
-            <div className="flex items-center gap-2 sm:hidden">
-              <button
-                onClick={handleLogout}
-                className="rounded-md border border-[#e5eacc]/60 bg-[#f4f7de]/90 px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-[#56652f] hover:bg-white transition-colors"
-              >
-                Logout
-              </button>
-            </div>
-          </div>
 
           {/* Desktop nav */}
           <nav className="hidden sm:block relative">
@@ -604,7 +611,19 @@ export default function HubLayout({ children }: { children: ReactNode }) {
           {children}
         </div>
       </section>
-    </main>
+      </main>
+
+      {canAccessWork && (
+        <HubAssistantChat
+          variant="floating"
+          storageKey="hub-work-assistant"
+          title="Hub AI assistant"
+          subtitle="Ask about guides, schedules, and data across the hub"
+          contextHint={assistantContext}
+          placeholder="Ask the assistant about schedules, guides, or requests"
+        />
+      )}
+    </>
   );
 }
 

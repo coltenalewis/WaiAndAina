@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
+import { loadSession } from "@/lib/session";
 
 type GuideSummary = {
   id: string;
@@ -14,6 +15,13 @@ export default function HowToGuidesPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
+  const [isAdmin, setIsAdmin] = useState(false);
+
+  useEffect(() => {
+    const session = loadSession();
+    const userType = (session?.userType || "").toLowerCase();
+    setIsAdmin(userType === "admin");
+  }, []);
 
   useEffect(() => {
     const loadGuides = async () => {
@@ -37,9 +45,10 @@ export default function HowToGuidesPage() {
 
   const filtered = useMemo(() => {
     const term = search.trim().toLowerCase();
-    if (!term) return guides;
-    return guides.filter((g) => g.title.toLowerCase().includes(term));
-  }, [guides, search]);
+    const visibleGuides = guides.filter((g) => isAdmin || g.title !== "AI Guide");
+    if (!term) return visibleGuides;
+    return visibleGuides.filter((g) => g.title.toLowerCase().includes(term));
+  }, [guides, isAdmin, search]);
 
   return (
     <div className="space-y-4">

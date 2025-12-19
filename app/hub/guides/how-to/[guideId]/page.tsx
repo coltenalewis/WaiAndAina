@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
+import { loadSession } from "@/lib/session";
 
 type RichTextNode = {
   plain: string;
@@ -35,6 +36,13 @@ export default function GuideDetailPage() {
   const [blocks, setBlocks] = useState<GuideBlock[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [isAdmin, setIsAdmin] = useState(false);
+
+  useEffect(() => {
+    const session = loadSession();
+    const userType = (session?.userType || "").toLowerCase();
+    setIsAdmin(userType === "admin");
+  }, []);
 
   useEffect(() => {
     if (!guideId) return;
@@ -46,6 +54,12 @@ export default function GuideDetailPage() {
         const res = await fetch(`/api/guides?id=${encodeURIComponent(guideId)}`);
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || "Failed to load guide");
+        if (!isAdmin && data.guide?.title === "AI Guide") {
+          setError("This guide is restricted to admins.");
+          setGuide(null);
+          setBlocks([]);
+          return;
+        }
         setGuide(data.guide);
         setBlocks(data.blocks || []);
       } catch (err) {
@@ -57,7 +71,7 @@ export default function GuideDetailPage() {
     };
 
     loadGuide();
-  }, [guideId]);
+  }, [guideId, isAdmin]);
 
   function renderRichText(text?: RichTextNode[]) {
     if (!text?.length) return null;
