@@ -414,8 +414,8 @@ export async function GET(req: Request) {
       return null;
     });
     const payload = await buildTaskPayload(page, name);
-    const editableProperties = buildEditableProperties(page?.properties || {}, db?.properties || {});
-    return NextResponse.json({ ...payload, properties: editableProperties });
+    const taskProperties = buildEditableProperties(page?.properties || {}, db?.properties || {});
+    return NextResponse.json({ ...payload, properties: taskProperties });
   } catch (err) {
     console.error("GET /task failed:", err);
     return NextResponse.json({ error: "Failed to fetch task" }, { status: 500 });
@@ -537,9 +537,12 @@ export async function PATCH(req: Request) {
       return null;
     });
     const payload = await buildTaskPayload(refreshed, name);
-    const editableProperties = buildEditableProperties(refreshed?.properties || {}, db?.properties || {});
+    const refreshedProperties = buildEditableProperties(
+      refreshed?.properties || {},
+      db?.properties || {}
+    );
 
-    return NextResponse.json({ ...payload, properties: editableProperties });
+    return NextResponse.json({ ...payload, properties: refreshedProperties });
   } catch (err) {
     console.error("PATCH /task failed:", err);
     return NextResponse.json({ error: "Failed to update task" }, { status: 500 });
