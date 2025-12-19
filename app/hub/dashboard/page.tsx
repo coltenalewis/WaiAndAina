@@ -29,12 +29,6 @@ type MiniTask = {
 
 const quickLinks = [
   {
-    href: "/hub",
-    title: "Schedule",
-    description: "View shifts, tasks, and live updates with status and comments.",
-    icon: "📆",
-  },
-  {
     href: "/hub/request",
     title: "Requests",
     description: "Submit or edit supply and task requests, plus follow comments.",
@@ -59,12 +53,17 @@ function isOffPlaceholder(task: string) {
   return base === "-";
 }
 
+function taskBaseName(task: string) {
+  return task.split("\n")[0].trim();
+}
+
 export default function WorkDashboardPage() {
   const router = useRouter();
   const [name, setName] = useState<string | null>(null);
   const [userType, setUserType] = useState<string | null>(null);
   const [miniTasks, setMiniTasks] = useState<MiniTask[]>([]);
   const [miniLoading, setMiniLoading] = useState(false);
+  const [alerts, setAlerts] = useState<string[]>([]);
 
   useEffect(() => {
     const session = loadSession();
@@ -87,6 +86,7 @@ export default function WorkDashboardPage() {
       return;
     }
     const normalizedName = name.toLowerCase();
+    const snapshotKey = `hub-dashboard-snapshot-${normalizedName}`;
 
     async function loadMiniSchedule() {
       setMiniLoading(true);
@@ -125,6 +125,90 @@ export default function WorkDashboardPage() {
         });
 
         setMiniTasks(tasks.slice(0, 6));
+
+        const uniqueTaskNames = Array.from(
+          new Set(tasks.map((entry) => taskBaseName(entry.task)))
+        ).filter(Boolean);
+
+        const [taskListRes, detailResults] = await Promise.all([
+          fetch("/api/task?list=1"),
+          Promise.all(
+            uniqueTaskNames.map(async (taskName) => {
+              const detailRes = await fetch(`/api/task?name=${encodeURIComponent(taskName)}`);
+              if (!detailRes.ok) return { name: taskName, status: "", commentCount: 0 };
+              const detail = await detailRes.json();
+              return {
+                name: taskName,
+                status: detail.status || "",
+                commentCount: Array.isArray(detail.comments) ? detail.comments.length : 0,
+              };
+            })
+          ),
+        ]);
+
+        const taskListJson = taskListRes.ok ? await taskListRes.json() : { tasks: [] };
+        const statusMap = new Map(
+          (taskListJson.tasks || []).map((task: { name: string; status?: string }) => [
+            task.name,
+            task.status || "",
+          ])
+        );
+        const detailMap = new Map(detailResults.map((item) => [item.name, item]));
+
+        const currentSnapshot = tasks.map((entry) => {
+          const base = taskBaseName(entry.task);
+          const detail = detailMap.get(base);
+          return {
+            task: base,
+            slot: entry.slot,
+            timeRange: entry.timeRange,
+            status: detail?.status || statusMap.get(base) || "",
+            commentCount: detail?.commentCount || 0,
+          };
+        });
+
+        const previousRaw = typeof window !== "undefined" ? localStorage.getItem(snapshotKey) : null;
+        let previous: { tasks?: any[] } | null = null;
+        if (previousRaw) {
+          try {
+            previous = JSON.parse(previousRaw);
+          } catch (err) {
+            console.warn("Failed to parse schedule snapshot", err);
+          }
+        }
+        const nextAlerts: string[] = [];
+
+        if (previous?.tasks) {
+          const prevMap = new Map(
+            previous.tasks.map((task: any) => [task.task, task])
+          );
+
+          currentSnapshot.forEach((task) => {
+            const prev = prevMap.get(task.task);
+            if (!prev) {
+              nextAlerts.push(`New task added: ${task.task} (${task.slot}).`);
+              return;
+            }
+            if (prev.status !== task.status) {
+              nextAlerts.push(`Status updated: ${task.task} is now "${task.status || "Unassigned"}".`);
+            }
+            if (task.commentCount > (prev.commentCount || 0)) {
+              nextAlerts.push(`New comments on ${task.task}.`);
+            }
+          });
+
+          previous.tasks.forEach((task: any) => {
+            const stillAssigned = currentSnapshot.some((entry) => entry.task === task.task);
+            if (!stillAssigned) {
+              nextAlerts.push(`Task removed: ${task.task}.`);
+            }
+          });
+        }
+
+        setAlerts(nextAlerts);
+        if (typeof window !== "undefined") {
+          localStorage.setItem(snapshotKey, JSON.stringify({ tasks: currentSnapshot, updatedAt: Date.now() }));
+        }
       } finally {
         setMiniLoading(false);
       }
@@ -135,7 +219,7 @@ export default function WorkDashboardPage() {
 
   return (
     <div className="space-y-6">
-      <div className="rounded-2xl border border-[#d0c9a4] bg-white shadow-sm p-6 flex flex-col gap-3">
+      <div className="rounded-3xl border border-[#d0c9a4] bg-gradient-to-br from-white via-[#f9f6e7] to-[#f1edd8] shadow-sm p-6 flex flex-col gap-3">
         <p className="text-xs uppercase tracking-[0.2em] text-[#7a7f54]">Work dashboard</p>
         <div className="flex flex-wrap items-center gap-3">
           <h1 className="text-2xl font-semibold text-[#3b4224]">Welcome{ name ? `, ${name.split(" ")[0]}` : "" }</h1>
@@ -150,11 +234,29 @@ export default function WorkDashboardPage() {
       <div className="grid lg:grid-cols-3 gap-4">
         <div className="lg:col-span-2 space-y-4">
           <div className="grid md:grid-cols-2 gap-4">
+            <Link
+              href="/hub"
+              className="group md:col-span-2 rounded-3xl border border-[#c8c49c] bg-gradient-to-br from-[#fefcf3] via-[#f7f4e6] to-[#e8eccd] p-6 shadow-md hover:-translate-y-0.5 transition"
+            >
+              <div className="flex items-center gap-4">
+                <span className="text-3xl">📆</span>
+                <div className="flex flex-col">
+                  <span className="text-2xl font-semibold text-[#3b4224]">Open schedule</span>
+                  <span className="text-xs uppercase tracking-[0.16em] text-[#7a7f54]">Main workspace</span>
+                </div>
+              </div>
+              <p className="mt-3 text-sm text-[#4b5133] leading-relaxed">
+                View shifts, tasks, and live updates with status changes, notes, and comments.
+              </p>
+              <span className="mt-4 inline-flex items-center gap-1 text-sm font-semibold text-[#5d7f3b] underline underline-offset-4">
+                Go to Schedule →
+              </span>
+            </Link>
             {quickLinks.map((link) => (
               <Link
                 key={link.href}
                 href={link.href}
-                className="group rounded-2xl border border-[#d0c9a4] bg-[#f7f4e6] p-5 shadow-sm hover:-translate-y-0.5 transition"
+                className="group rounded-2xl border border-[#d0c9a4] bg-white/80 p-5 shadow-sm hover:-translate-y-0.5 transition"
               >
                 <div className="flex items-center gap-3">
                   <span className="text-2xl">{link.icon}</span>
@@ -171,29 +273,27 @@ export default function WorkDashboardPage() {
             ))}
           </div>
 
-          <div className="grid md:grid-cols-3 gap-4">
-            <div className="rounded-2xl border border-[#d0c9a4] bg-white p-5 shadow-sm">
-              <h3 className="text-lg font-semibold text-[#3b4224]">Today at a glance</h3>
-              <p className="mt-2 text-sm text-[#4b5133] leading-relaxed">
-                Check the schedule view to see live task boxes, meal shifts, and comments. Status updates sync with Notion instantly.
-              </p>
+          {alerts.length > 0 && (
+            <div className="rounded-2xl border border-[#d0c9a4] bg-white/80 p-5 shadow-sm">
+              <div className="flex items-center justify-between gap-2">
+                <h3 className="text-lg font-semibold text-[#3b4224]">Schedule updates</h3>
+                <span className="text-[11px] uppercase tracking-[0.12em] text-[#7a7f54]">
+                  Since last visit
+                </span>
+              </div>
+              <ul className="mt-3 space-y-2 text-sm text-[#4b5133]">
+                {alerts.map((alert, idx) => (
+                  <li key={`${alert}-${idx}`} className="flex items-start gap-2">
+                    <span className="mt-1 h-2 w-2 rounded-full bg-[#8fae4c]" />
+                    <span>{alert}</span>
+                  </li>
+                ))}
+              </ul>
             </div>
-            <div className="rounded-2xl border border-[#d0c9a4] bg-white p-5 shadow-sm">
-              <h3 className="text-lg font-semibold text-[#3b4224]">Requests</h3>
-              <p className="mt-2 text-sm text-[#4b5133] leading-relaxed">
-                Submit new needs, edit pending requests, and track approvals. Comment threads mirror task comment handling.
-              </p>
-            </div>
-            <div className="rounded-2xl border border-[#d0c9a4] bg-white p-5 shadow-sm">
-              <h3 className="text-lg font-semibold text-[#3b4224]">Arcade rewards</h3>
-              <p className="mt-2 text-sm text-[#4b5133] leading-relaxed">
-                Earn goats in Goat Run and bet them in Goat Dice. Leaderboards update automatically after each game.
-              </p>
-            </div>
-          </div>
+          )}
         </div>
 
-        <div className="rounded-2xl border border-[#d0c9a4] bg-white p-5 shadow-sm h-full flex flex-col">
+        <div className="rounded-2xl border border-[#d0c9a4] bg-white/85 p-5 shadow-sm h-full flex flex-col">
           <div className="flex items-center justify-between gap-2">
             <div>
               <p className="text-xs uppercase tracking-[0.18em] text-[#7a7f54]">Mini schedule</p>

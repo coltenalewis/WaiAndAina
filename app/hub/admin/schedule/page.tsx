@@ -604,13 +604,13 @@ export default function AdminScheduleEditorPage() {
             <table className="min-w-full border-collapse text-sm">
               <thead className="bg-[#e5e7c5]">
                 <tr>
-                  <th className="min-w-[160px] border border-[#d1d4aa] px-3 py-2 text-left text-[11px] font-semibold uppercase tracking-[0.12em] text-[#5d7f3b]">
+                  <th className="min-w-[160px] border border-[#d1d4aa] px-3 py-2 text-left text-[11px] font-semibold uppercase tracking-[0.12em] text-[#5d7f3b] sticky left-0 top-0 z-30 bg-[#e5e7c5]">
                     Person
                   </th>
                   {scheduleData?.slots.map((slot) => (
                     <th
                       key={slot.id}
-                      className="border border-[#d1d4aa] px-3 py-2 text-left text-[11px] font-semibold uppercase tracking-[0.12em] text-[#5d7f3b]"
+                      className="border border-[#d1d4aa] px-3 py-2 text-left text-[11px] font-semibold uppercase tracking-[0.12em] text-[#5d7f3b] sticky top-0 z-20 bg-[#e5e7c5]"
                     >
                       <div className="flex items-center justify-between gap-2">
                         <div>
@@ -628,7 +628,7 @@ export default function AdminScheduleEditorPage() {
               <tbody>
                 {scheduleData?.people.map((person, rowIdx) => (
                   <tr key={person} className={rowIdx % 2 === 0 ? "bg-[#faf8ea]" : "bg-[#f4f2df]"}>
-                    <td className="border border-[#d1d4aa] px-3 py-2 align-top text-sm font-semibold text-[#4f5730]">
+                    <td className="border border-[#d1d4aa] px-3 py-2 align-top text-sm font-semibold text-[#4f5730] sticky left-0 z-20 bg-[#f6f4e3]">
                       <div className="flex items-center justify-between gap-2">
                         <span>{person}</span>
                         <span className="text-[10px] text-[#7a7f54]">{rowIdx + 1}</span>
@@ -652,7 +652,10 @@ export default function AdminScheduleEditorPage() {
                               setPendingInsert(null);
                             }
                           }}
-                          onDrop={(e) => handleDropEvent(e, person, slot, index)}
+                          onDrop={(e) => {
+                            e.stopPropagation();
+                            handleDropEvent(e, person, slot, index);
+                          }}
                           className={`h-2 rounded-full transition-all duration-150 ${
                             pendingInsert?.person === person && pendingInsert.slotId === slot.id && pendingInsert.index === index
                               ? "bg-[#c8d99a] shadow-[0_0_0_2px_rgba(200,217,154,0.6)]"
@@ -675,14 +678,6 @@ export default function AdminScheduleEditorPage() {
                             if (pendingInsert?.person === person && pendingInsert.slotId === slot.id) {
                               setPendingInsert(null);
                             }
-                          }}
-                          onDrop={(e) => {
-                            const targetIndex =
-                              pendingInsert?.person === person && pendingInsert?.slotId === slot.id
-                                ? pendingInsert.index
-                                : content.tasks.length;
-                            handleDropEvent(e, person, slot, targetIndex);
-                            setPendingInsert(null);
                           }}
                         >
                           <div
@@ -738,11 +733,23 @@ export default function AdminScheduleEditorPage() {
                                   >
                                     <div className="flex items-start justify-between gap-2">
                                       <span className="font-semibold">{base}</span>
-                                      {meta?.status && (
-                                        <span className="rounded-full bg-white/80 px-2 py-[1px] text-[9px] font-semibold text-[#4f4f31]">
-                                          {meta.status}
-                                        </span>
-                                      )}
+                                      <div className="flex items-center gap-2">
+                                        {meta?.status && (
+                                          <span className="rounded-full bg-white/80 px-2 py-[1px] text-[9px] font-semibold text-[#4f4f31]">
+                                            {meta.status}
+                                          </span>
+                                        )}
+                                        <button
+                                          type="button"
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            removeTaskFromCell({ person, slotId: slot.id }, task, idx);
+                                          }}
+                                          className="rounded-full border border-[#d1d4aa] bg-white/80 px-2 py-[1px] text-[10px] font-semibold text-[#a05252] hover:bg-[#f7e3e3]"
+                                        >
+                                          ✕
+                                        </button>
+                                      </div>
                                     </div>
                                     {content.note && (
                                       <p className="text-[11px] text-[#4f4b33] opacity-90">{content.note}</p>
@@ -763,30 +770,40 @@ export default function AdminScheduleEditorPage() {
                                 <span className="text-[11px] italic text-[#7a7f54]">
                                   Drop tasks here or type below.
                                 </span>
-                                <input
-                                  list="task-options"
-                                  value={inlineTaskDrafts[`${person}-${slot.id}`] || ""}
-                                  onFocus={() => setSelectedCell({ person, slotId: slot.id, slotLabel: slot.label })}
-                                  onChange={(e) =>
-                                    setInlineTaskDrafts((prev) => ({
-                                      ...prev,
-                                      [`${person}-${slot.id}`]: e.target.value,
-                                    }))
-                                  }
-                                  onKeyDown={(e) => {
-                                    if (e.key === "Enter") {
-                                      e.preventDefault();
-                                      addInlineTask(person, slot, inlineTaskDrafts[`${person}-${slot.id}`] || "", 0);
-                                    }
-                                  }}
-                                  onBlur={() =>
-                                    addInlineTask(person, slot, inlineTaskDrafts[`${person}-${slot.id}`] || "", 0)
-                                  }
-                                  placeholder="Type or choose a task"
-                                  className="w-full rounded-md border border-[#d0c9a4] bg-white px-2 py-1 text-[12px] text-[#3f4630] focus:border-[#8fae4c] focus:outline-none"
-                                />
                               </div>
                             )}
+                            <div className="rounded-md border border-[#d0c9a4] bg-white/80 p-2">
+                              <label className="text-[10px] uppercase tracking-[0.12em] text-[#7a7f54]">
+                                Add task
+                              </label>
+                              <input
+                                list="task-options"
+                                value={inlineTaskDrafts[`${person}-${slot.id}`] || ""}
+                                onFocus={() => setSelectedCell({ person, slotId: slot.id, slotLabel: slot.label })}
+                                onChange={(e) =>
+                                  setInlineTaskDrafts((prev) => ({
+                                    ...prev,
+                                    [`${person}-${slot.id}`]: e.target.value,
+                                  }))
+                                }
+                                onKeyDown={(e) => {
+                                  if (e.key === "Enter") {
+                                    e.preventDefault();
+                                    addInlineTask(person, slot, inlineTaskDrafts[`${person}-${slot.id}`] || "", content.tasks.length);
+                                  }
+                                }}
+                                onBlur={() =>
+                                  addInlineTask(
+                                    person,
+                                    slot,
+                                    inlineTaskDrafts[`${person}-${slot.id}`] || "",
+                                    content.tasks.length
+                                  )
+                                }
+                                placeholder="Type or choose a task"
+                                className="mt-1 w-full rounded-md border border-[#d0c9a4] bg-white px-2 py-1 text-[12px] text-[#3f4630] focus:border-[#8fae4c] focus:outline-none"
+                              />
+                            </div>
                           </div>
                         </td>
                       );
