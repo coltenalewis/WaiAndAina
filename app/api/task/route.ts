@@ -3,6 +3,7 @@ import {
   createComment,
   queryAllDatabasePages,
   queryDatabase,
+  retrieveDatabase,
   retrieveComments,
   updatePage,
 } from "@/lib/notion";
@@ -20,6 +21,14 @@ const TASK_TYPE_PROPERTY_KEY = "Task Type"; // select
 const TASK_LINKS_PROPERTY_KEY = "Links"; // rich_text or url
 const TASK_ESTIMATE_PROPERTY_KEY = "Estimated Time"; // rich_text or text
 const TASK_NOTES_PROPERTY_KEY = "Extra Notes"; // rich_text or text
+
+type TaskPropertyField = {
+  name: string;
+  type: string;
+  value: string | string[] | boolean | number | null;
+  options?: { name: string; color?: string }[];
+  readOnly?: boolean;
+};
 
 // ─────────────────────────────────────────────
 // Helpers
@@ -209,6 +218,148 @@ async function buildTaskPayload(page: any, fallbackName: string) {
   };
 }
 
+function getSelectOptions(schemaProp: any) {
+  if (!schemaProp) return [];
+  const optionList =
+    schemaProp?.type === "select"
+      ? schemaProp.select?.options
+      : schemaProp?.type === "multi_select"
+        ? schemaProp.multi_select?.options
+        : schemaProp?.type === "status"
+          ? schemaProp.status?.options
+          : null;
+
+  if (!Array.isArray(optionList)) return [];
+
+  return optionList.map((opt: any) => ({
+    name: opt.name || "",
+    color: opt.color || "default",
+  }));
+}
+
+function buildEditableProperties(props: Record<string, any>, schemaProps: Record<string, any>) {
+  return Object.entries(props || {}).map(([name, prop]) => {
+    const schemaProp = schemaProps?.[name];
+    const type = prop?.type || "unknown";
+    const options = getSelectOptions(schemaProp);
+    let value: TaskPropertyField["value"] = "";
+    let readOnly = false;
+
+    switch (type) {
+      case "title":
+      case "rich_text":
+        value = getPlainText(prop);
+        break;
+      case "select":
+        value = prop.select?.name || "";
+        break;
+      case "status":
+        value = prop.status?.name || "";
+        break;
+      case "multi_select":
+        value = (prop.multi_select || []).map((item: any) => item?.name || "").filter(Boolean);
+        break;
+      case "checkbox":
+        value = Boolean(prop.checkbox);
+        break;
+      case "url":
+        value = prop.url || "";
+        break;
+      case "email":
+        value = prop.email || "";
+        break;
+      case "phone_number":
+        value = prop.phone_number || "";
+        break;
+      case "number":
+        value = prop.number ?? null;
+        break;
+      case "date":
+        value = prop.date?.start ? String(prop.date.start).split("T")[0] : "";
+        break;
+      case "files":
+      case "created_time":
+      case "last_edited_time":
+      case "created_by":
+      case "last_edited_by":
+      case "formula":
+      case "rollup":
+      case "relation":
+      case "people":
+        value = getPlainText(prop) || "";
+        readOnly = true;
+        break;
+      default:
+        value = getPlainText(prop) || "";
+        readOnly = true;
+    }
+
+    return {
+      name,
+      type,
+      value,
+      options: options.length ? options : undefined,
+      readOnly,
+    } satisfies TaskPropertyField;
+  });
+}
+
+function buildPropertyUpdate(field: TaskPropertyField) {
+  switch (field.type) {
+    case "title":
+      return {
+        title: field.value
+          ? [{ type: "text", text: { content: String(field.value) } }]
+          : [],
+      };
+    case "rich_text":
+      return {
+        rich_text: field.value
+          ? [{ type: "text", text: { content: String(field.value) } }]
+          : [],
+      };
+    case "select":
+      return {
+        select: field.value ? { name: String(field.value) } : null,
+      };
+    case "status":
+      return {
+        status: field.value ? { name: String(field.value) } : null,
+      };
+    case "multi_select":
+      return {
+        multi_select: Array.isArray(field.value)
+          ? field.value.filter(Boolean).map((name) => ({ name }))
+          : String(field.value || "")
+              .split(",")
+              .map((name) => name.trim())
+              .filter(Boolean)
+              .map((name) => ({ name })),
+      };
+    case "checkbox":
+      return { checkbox: Boolean(field.value) };
+    case "url":
+      return { url: field.value ? String(field.value) : null };
+    case "email":
+      return { email: field.value ? String(field.value) : null };
+    case "phone_number":
+      return { phone_number: field.value ? String(field.value) : null };
+    case "number":
+      return {
+        number:
+          field.value === null || field.value === "" || Number.isNaN(Number(field.value))
+            ? null
+            : Number(field.value),
+      };
+    case "date":
+      return {
+        date: field.value ? { start: String(field.value) } : null,
+      };
+    default:
+      return null;
+  }
+}
+
 // ─────────────────────────────────────────────
 // GET — list tasks or fetch task details by name
 // ─────────────────────────────────────────────
@@ -258,8 +409,13 @@ export async function GET(req: Request) {
     const page = await findTaskPageByName(name);
     if (!page) return NextResponse.json({ error: "Task not found" }, { status: 404 });
 
+    const db = await retrieveDatabase(TASKS_DB_ID).catch((err) => {
+      console.error("Failed to retrieve tasks database:", err);
+      return null;
+    });
     const payload = await buildTaskPayload(page, name);
-    return NextResponse.json(payload);
+    const taskProperties = buildEditableProperties(page?.properties || {}, db?.properties || {});
+    return NextResponse.json({ ...payload, properties: taskProperties });
   } catch (err) {
     console.error("GET /task failed:", err);
     return NextResponse.json({ error: "Failed to fetch task" }, { status: 500 });
@@ -283,6 +439,7 @@ export async function PATCH(req: Request) {
     extraNotes,
     links,
     estimatedTime,
+    properties: editableProperties,
   }: {
     name?: string;
     status?: string | null;
@@ -291,6 +448,7 @@ export async function PATCH(req: Request) {
     extraNotes?: string | null;
     links?: string | null;
     estimatedTime?: string | null;
+    properties?: TaskPropertyField[];
   } = body || {};
 
   if (!name) {
@@ -303,7 +461,8 @@ export async function PATCH(req: Request) {
     taskType !== undefined ||
     extraNotes !== undefined ||
     links !== undefined ||
-    estimatedTime !== undefined;
+    estimatedTime !== undefined ||
+    (Array.isArray(editableProperties) && editableProperties.length > 0);
 
   if (!hasAnyUpdate) {
     return NextResponse.json({ error: "No updates provided for this task" }, { status: 400 });
@@ -314,6 +473,16 @@ export async function PATCH(req: Request) {
     if (!page) return NextResponse.json({ error: "Task not found" }, { status: 404 });
 
     const properties: Record<string, any> = {};
+
+    if (Array.isArray(editableProperties)) {
+      editableProperties.forEach((field) => {
+        if (!field?.name || field.readOnly) return;
+        const update = buildPropertyUpdate(field);
+        if (update) {
+          properties[field.name] = update;
+        }
+      });
+    }
 
     if (status !== undefined) {
       properties[TASK_STATUS_PROPERTY_KEY] = status
@@ -361,9 +530,19 @@ export async function PATCH(req: Request) {
     await updatePage(page.id, properties);
 
     const refreshed = await findTaskPageByName(name);
-    const payload = refreshed ? await buildTaskPayload(refreshed, name) : { success: true };
+    if (!refreshed) return NextResponse.json({ success: true });
 
-    return NextResponse.json(payload);
+    const db = await retrieveDatabase(TASKS_DB_ID).catch((err) => {
+      console.error("Failed to retrieve tasks database:", err);
+      return null;
+    });
+    const payload = await buildTaskPayload(refreshed, name);
+    const refreshedProperties = buildEditableProperties(
+      refreshed?.properties || {},
+      db?.properties || {}
+    );
+
+    return NextResponse.json({ ...payload, properties: refreshedProperties });
   } catch (err) {
     console.error("PATCH /task failed:", err);
     return NextResponse.json({ error: "Failed to update task" }, { status: 500 });

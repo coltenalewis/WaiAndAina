@@ -210,6 +210,7 @@ export default function HubSchedulePage() {
   const [currentUserType, setCurrentUserType] = useState<string | null>(null);
   const [currentSlotId, setCurrentSlotId] = useState<string | null>(null);
   const [isOnline, setIsOnline] = useState<boolean>(true);
+  const [knownUsers, setKnownUsers] = useState<string[]>([]);
   const scheduleScrollRef = useRef<HTMLDivElement | null>(null);
 
   const [activeView, setActiveView] = useState<"schedule" | "myTasks">(
@@ -472,6 +473,21 @@ export default function HubSchedulePage() {
     if (session?.userType) setCurrentUserType(session.userType);
   }, []);
 
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetch("/api/users");
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const json = await res.json();
+        if (Array.isArray(json.users)) {
+          setKnownUsers(json.users.map((user: any) => user.name || user).filter(Boolean));
+        }
+      } catch (err) {
+        console.error("Failed to load users list", err);
+      }
+    })();
+  }, []);
+
   // Track online/offline status so we can present cached data in read-only mode
   useEffect(() => {
     if (typeof navigator !== "undefined") {
@@ -712,42 +728,55 @@ export default function HubSchedulePage() {
     [workSlots]
   );
 
-  type CombinedCell = {
+  type ShiftTaskCell = {
     slot: Slot;
-    names: string[];
     tasks: { task: string; people: string[] }[];
   };
 
-  const combineSlotAssignments = useCallback(
-    (targetSlots: Slot[]): CombinedCell[] => {
+  const shiftTaskAssignments = useCallback(
+    (targetSlots: Slot[]): ShiftTaskCell[] => {
       if (!data) return [];
+
+      const knownUserSet = new Set(
+        knownUsers.map((user) => user.toLowerCase().trim())
+      );
 
       return targetSlots.map((slot) => {
         const slotIdx = data.slots.findIndex((s) => s.id === slot.id);
         if (slotIdx === -1) {
-          return { slot, names: [], tasks: [] };
+          return { slot, tasks: [] };
         }
 
-        const nameSet = new Set<string>();
         const taskMap: Record<string, Set<string>> = {};
 
         data.people.forEach((person, rowIdx) => {
           const cell = (data.cells[rowIdx]?.[slotIdx] ?? "").trim();
           if (!cell) return;
 
-          const tasks = splitCellTasks(cell);
-          tasks.forEach((task) => {
-            const key = taskBaseName(task);
-            if (!key) return;
-            nameSet.add(person);
-            if (!taskMap[key]) taskMap[key] = new Set();
-            taskMap[key].add(person);
-          });
+          const normalizedPerson = person.toLowerCase().trim();
+          const isKnownUser = knownUserSet.has(normalizedPerson);
+
+          if (isKnownUser) {
+            const tasks = splitCellTasks(cell);
+            tasks.forEach((task) => {
+              const key = taskBaseName(task);
+              if (!key) return;
+              if (!taskMap[key]) taskMap[key] = new Set();
+              taskMap[key].add(person);
+            });
+          } else {
+            const taskName = person.trim();
+            if (!taskName) return;
+            const assignedPeople = splitCellTasks(cell).map(taskBaseName).filter(Boolean);
+            if (!taskMap[taskName]) taskMap[taskName] = new Set();
+            assignedPeople.forEach((assigned) => {
+              taskMap[taskName].add(assigned);
+            });
+          }
         });
 
         return {
           slot,
-          names: Array.from(nameSet),
           tasks: Object.entries(taskMap).map(([task, people]) => ({
             task,
             people: Array.from(people),
@@ -755,24 +784,23 @@ export default function HubSchedulePage() {
         };
       });
     },
-    [data]
+    [data, knownUsers]
   );
 
-  const eveningCombined = useMemo(
-    () => combineSlotAssignments(eveningSlots),
-    [combineSlotAssignments, eveningSlots]
+  const eveningShiftTasks = useMemo(
+    () => shiftTaskAssignments(eveningSlots),
+    [eveningSlots, shiftTaskAssignments]
+  );
+  const weekendShiftTasks = useMemo(
+    () => shiftTaskAssignments(weekendSlots),
+    [shiftTaskAssignments, weekendSlots]
   );
 
-  const weekendCombined = useMemo(
-    () => combineSlotAssignments(weekendSlots),
-    [combineSlotAssignments, weekendSlots]
+  const eveningHasContent = eveningShiftTasks.some(
+    (cell) => cell.tasks.length > 0
   );
-
-  const eveningHasContent = eveningCombined.some(
-    (cell) => cell.tasks.length > 0 || cell.names.length > 0
-  );
-  const weekendHasContent = weekendCombined.some(
-    (cell) => cell.tasks.length > 0 || cell.names.length > 0
+  const weekendHasContent = weekendShiftTasks.some(
+    (cell) => cell.tasks.length > 0
   );
 
   const showEveningSection = !isExternalVolunteer && eveningHasContent;
@@ -1320,10 +1348,10 @@ async function handleTaskClick(taskPayload: TaskClickPayload) {
           !error &&
           data &&
           showEveningSection && (
-            <ShiftBoard
+            <ShiftTaskTable
               title="Evening Schedule"
               description="Evening shift tasks that can be completed between 5:30 PM and 10:00 PM."
-              combined={eveningCombined}
+              slots={eveningShiftTasks}
               onTaskClick={handleTaskClick}
               taskMetaMap={taskMetaMap}
               statusColors={statusColorLookup}
@@ -1335,10 +1363,10 @@ async function handleTaskClick(taskPayload: TaskClickPayload) {
           !error &&
           data &&
           showWeekendSection && (
-            <ShiftBoard
+            <ShiftTaskTable
               title="Weekend Schedule"
               description="Weekend shift coverage. Tasks can be completed within the listed time ranges."
-              combined={weekendCombined}
+              slots={weekendShiftTasks}
               onTaskClick={handleTaskClick}
               taskMetaMap={taskMetaMap}
               statusColors={statusColorLookup}
@@ -1967,8 +1995,8 @@ function ShiftBoard({
   statusColors: Record<string, string>;
   currentUserName?: string | null;
 }) {
-  const hasTasks = combined.some((cell) => cell.tasks.length > 0);
   const normalizedUser = (currentUserName || "").toLowerCase().trim();
+  const hasTasks = combined.some((cell) => cell.tasks.length > 0);
 
   return (
     <section className="space-y-3">
@@ -2135,6 +2163,131 @@ function ShiftBoard({
             );
           })()}
         </div>
+      )}
+    </section>
+  );
+}
+
+function ShiftTaskTable({
+  title,
+  description,
+  slots,
+  onTaskClick,
+  taskMetaMap,
+  statusColors,
+  currentUserName,
+}: {
+  title: string;
+  description: string;
+  slots: { slot: Slot; tasks: { task: string; people: string[] }[] }[];
+  onTaskClick?: (payload: TaskClickPayload) => void;
+  taskMetaMap: Record<string, TaskMeta>;
+  statusColors: Record<string, string>;
+  currentUserName?: string | null;
+}) {
+  const normalizedUser = (currentUserName || "").toLowerCase().trim();
+  const hasTasks = slots.some((entry) => entry.tasks.length > 0);
+
+  return (
+    <section className="space-y-3">
+      <div className="flex flex-col gap-1">
+        <h3 className="text-xl font-semibold tracking-[0.16em] uppercase text-[#5d7f3b]">
+          {title}
+        </h3>
+        <p className="text-sm text-[#7a7f54]">{description}</p>
+      </div>
+
+      <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
+        {slots.map((entry) => (
+          <div
+            key={entry.slot.id}
+            className="rounded-lg border border-[#d0c9a4] bg-white/85 shadow-sm"
+          >
+            <div className="flex items-start justify-between gap-2 border-b border-[#e2d7b5] bg-[#f4f1df] px-4 py-3">
+              <div className="flex flex-col">
+                <span className="text-sm font-semibold text-[#42502d]">
+                  {entry.slot.label}
+                </span>
+                {entry.slot.timeRange && (
+                  <span className="text-[11px] text-[#8a8256]">
+                    {entry.slot.timeRange}
+                  </span>
+                )}
+              </div>
+              <span className="rounded-full bg-[#eef2d9] px-2 py-[2px] text-[10px] font-semibold uppercase tracking-[0.12em] text-[#4f5730]">
+                {entry.tasks.length} {entry.tasks.length === 1 ? "task" : "tasks"}
+              </span>
+            </div>
+
+            <div className="px-4 py-3 space-y-2">
+              {entry.tasks.length === 0 ? (
+                <p className="text-[11px] italic text-[#7a7f54]">
+                  No tasks listed for this shift.
+                </p>
+              ) : (
+                entry.tasks.map((task) => {
+                  const participants = task.people;
+                  const includesUser = normalizedUser
+                    ? participants.some((p) => p.toLowerCase() === normalizedUser)
+                    : false;
+                  const meta = taskMetaMap[taskBaseName(task.task)];
+                  const status = meta?.status;
+                  const typeClass = typeColorClasses(meta?.typeColor);
+                  const primaryPerson = includesUser
+                    ? currentUserName || participants[0] || "Team"
+                    : participants[0] || currentUserName || "Team";
+
+                  return (
+                    <button
+                      key={`${entry.slot.id}-${task.task}`}
+                      type="button"
+                      onClick={() =>
+                        onTaskClick?.({
+                          person: primaryPerson,
+                          slot: entry.slot,
+                          task: task.task,
+                          groupNames: participants,
+                        })
+                      }
+                      className={`w-full rounded-md border px-3 py-2 text-left shadow-sm transition hover:shadow ${typeClass} ${
+                        includesUser ? "ring-2 ring-[#d2e4a0]" : ""
+                      }`}
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div>
+                          <div className="font-semibold text-[#42502d]">
+                            {task.task}
+                          </div>
+                          <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-[#7a7f54]">
+                            <span className="rounded-full bg-white/80 px-2 py-[2px] text-[10px] font-semibold uppercase tracking-[0.12em] text-[#4f5730]">
+                              {participants.length}{" "}
+                              {participants.length === 1 ? "person" : "people"}
+                            </span>
+                            {includesUser && (
+                              <span className="inline-flex items-center rounded-full bg-[#f1edd8] px-2 py-[1px] text-[10px] font-semibold text-[#4f4b33]">
+                                You&apos;re on this task
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                        <StatusBadge
+                          status={status}
+                          color={statusColors[status || ""]}
+                        />
+                      </div>
+                    </button>
+                  );
+                })
+              )}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {!hasTasks && (
+        <p className="text-sm text-[#7a7f54] italic">
+          No tasks listed for this shift yet.
+        </p>
       )}
     </section>
   );

@@ -1,7 +1,6 @@
 "use client";
 
 import React, { useEffect, useMemo, useState } from "react";
-import { DATABASE_REGISTRY, HUB_REFERENCE_LINKS } from "@/lib/databaseRegistry";
 
 export type ChatMessage = { role: "user" | "assistant"; content: string; status?: "thinking" };
 
@@ -47,38 +46,6 @@ function renderMessageContent(text: string) {
   });
 
   return parts;
-}
-
-function DataSources() {
-  return (
-    <div className="mt-3 space-y-2 rounded-lg border border-dashed border-[#d9d3ad] bg-[#f9f6e7] p-3">
-      <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-[#6a6c4d]">Data coverage</p>
-      <div className="flex flex-wrap gap-2">
-        {DATABASE_REGISTRY.map((db) => (
-          <span
-            key={db.name}
-            className="inline-flex items-center gap-2 rounded-full border border-[#d0c9a4] bg-white px-3 py-1 text-[11px] font-semibold text-[#3f4630] shadow-sm"
-            title={db.purpose}
-          >
-            <span className="h-2 w-2 rounded-full bg-[#8fae4c]" />
-            {db.name}
-          </span>
-        ))}
-      </div>
-      <div className="flex flex-wrap gap-2 text-[11px] text-[#4b5133]">
-        {HUB_REFERENCE_LINKS.map((ref) => (
-          <a
-            key={ref.href}
-            href={ref.href}
-            className="inline-flex items-center gap-1 rounded-md bg-white px-2 py-1 text-[11px] font-semibold text-[#3f4630] underline decoration-[#8fae4c] hover:bg-[#f1edd8]"
-          >
-            <span>➜</span>
-            <span>{ref.label}</span>
-          </a>
-        ))}
-      </div>
-    </div>
-  );
 }
 
 export function HubAssistantChat({
@@ -231,18 +198,8 @@ export function HubAssistantChat({
             >
               {chatLoading ? "Thinking…" : "Send"}
             </button>
-            <div className="flex flex-wrap items-center gap-2 text-[11px] text-[#6b6d4b]">
-              <span className="inline-flex items-center gap-1 rounded-full bg-[#f4f7de] px-2 py-1 font-semibold uppercase tracking-[0.1em] text-[#4b5133]">
-                • AI pulls from hub databases
-              </span>
-              <span className="inline-flex items-center gap-1 rounded-full bg-[#f4f7de] px-2 py-1 font-semibold uppercase tracking-[0.1em] text-[#4b5133]">
-                • Links render as chips
-              </span>
-            </div>
           </div>
         </form>
-
-        <DataSources />
       </div>
     ),
     [chatInput, chatLoading, handleSubmit, messages, placeholder, subtitle, title, variant]
