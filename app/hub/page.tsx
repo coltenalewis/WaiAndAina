@@ -2309,6 +2309,7 @@ function ShiftBoard({
   title,
   description,
   combined,
+  layout = "slot",
   onTaskClick,
   taskMetaMap,
   statusColors,
@@ -2317,6 +2318,7 @@ function ShiftBoard({
   title: string;
   description: string;
   combined: { slot: Slot; names: string[]; tasks: { task: string; people: string[] }[] }[];
+  layout?: "slot" | "person";
   onTaskClick?: (payload: TaskClickPayload) => void;
   taskMetaMap: Record<string, TaskMeta>;
   statusColors: Record<string, string>;
@@ -2334,127 +2336,187 @@ function ShiftBoard({
         <p className="text-sm text-[#7a7f54]">{description}</p>
       </div>
 
-      <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
-        {combined.map((cell) => (
-          <div
-            key={cell.slot.id}
-            className="rounded-lg border border-[#d0c9a4] bg-white/85 shadow-sm"
-          >
-            <div className="flex items-start justify-between gap-2 border-b border-[#e2d7b5] bg-[#f4f1df] px-4 py-3">
-              <div className="flex flex-col">
+      {layout === "person" ? (
+        <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
+          {personEntries.map((entry) => (
+            <div
+              key={entry.name}
+              className="rounded-lg border border-[#d0c9a4] bg-white/85 shadow-sm"
+            >
+              <div className="border-b border-[#e2d7b5] bg-[#f4f1df] px-4 py-3">
                 <span className="text-sm font-semibold text-[#42502d]">
-                  {cell.slot.label}
+                  {entry.name}
                 </span>
-                {cell.slot.timeRange && (
-                  <span className="text-[11px] text-[#8a8256]">
-                    {cell.slot.timeRange}
-                  </span>
-                )}
+                <div className="mt-1 h-[1px] w-full bg-[#d7d0ad]" />
               </div>
-              <span className="rounded-full bg-[#eef2d9] px-2 py-[2px] text-[10px] font-semibold uppercase tracking-[0.12em] text-[#4f5730]">
-                {cell.tasks.length} {cell.tasks.length === 1 ? "task" : "tasks"}
-              </span>
-            </div>
-
-            <div className="px-4 py-3 space-y-3">
-              <div className="flex flex-wrap gap-2">
-                {cell.names.length ? (
-                  cell.names.map((name) => (
-                    <span
-                      key={name}
-                      className="inline-flex items-center rounded-full bg-[#eef5dd] px-3 py-1 text-[12px] font-semibold text-[#42502d]"
-                    >
-                      {name}
-                    </span>
-                  ))
-                ) : (
-                  <span className="text-[11px] italic text-[#7a7f54]">
-                    No one assigned yet.
-                  </span>
-                )}
-              </div>
-
-              <div className="space-y-2">
-                {cell.tasks.length === 0 ? (
+              <div className="px-4 py-3">
+                {entry.tasks.length === 0 ? (
                   <p className="text-[11px] italic text-[#7a7f54]">
-                    No tasks listed for this block.
+                    No tasks listed yet.
                   </p>
                 ) : (
-                  cell.tasks.map((task) => {
-                    const participants =
-                      task.people.length > 0 ? task.people : cell.names;
-                    const primaryPerson = participants[0] || "Team";
-                    const includesUser = normalizedUser
-                      ? participants.some((p) => p.toLowerCase() === normalizedUser)
-                      : false;
-                    const meta = taskMetaMap[taskBaseName(task.task)];
-                    const status = meta?.status;
-                    const typeClass = typeColorClasses(meta?.typeColor);
+                  <div className="flex flex-wrap gap-2">
+                    {entry.tasks.map((taskItem, idx) => {
+                      const meta = taskMetaMap[taskBaseName(taskItem.task)];
+                      const status = meta?.status;
+                      const typeClass = typeColorClasses(meta?.typeColor);
 
-                    return (
-                      <button
-                        key={`${cell.slot.id}-${task.task}`}
-                        type="button"
-                        onClick={() =>
-                          onTaskClick?.({
-                            person: primaryPerson,
-                            slot: cell.slot,
-                            task: task.task,
-                            groupNames: participants,
-                          })
-                        }
-                        className={`w-full rounded-md border px-3 py-2 text-left shadow-sm transition hover:shadow ${typeClass} ${
-                          includesUser ? "ring-2 ring-[#d2e4a0]" : ""
-                        }`}
-                      >
-                        <div className="flex items-start justify-between gap-2">
-                          <div>
-                            <div className="font-semibold text-[#42502d]">
-                              {task.task}
-                            </div>
-                            <div className="text-[11px] text-[#7a7f54] space-y-1">
-                              <div className="flex flex-wrap gap-1">
-                                {participants.length
-                                  ? participants.map((p) => {
-                                      const isMe =
-                                        normalizedUser &&
-                                        p.toLowerCase() === normalizedUser;
-                                      return (
-                                        <span
-                                          key={p}
-                                          className={`rounded-full px-2 py-[2px] text-[11px] font-semibold ${
-                                            isMe
-                                              ? "bg-[#a0b764] text-white"
-                                              : "bg-[#eef2d9] text-[#3f4b29]"
-                                          }`}
-                                        >
-                                          {isMe ? `${p} (you)` : p}
-                                        </span>
-                                      );
-                                    })
-                                  : "No names yet"}
-                              </div>
-                              {includesUser && (
-                                <span className="inline-flex items-center rounded-full bg-[#f1edd8] px-2 py-[1px] text-[10px] font-semibold text-[#4f4b33]">
-                                  You&apos;re on this task
-                                </span>
-                              )}
-                            </div>
+                      return (
+                        <button
+                          key={`${entry.name}-${taskItem.slot.id}-${taskItem.task}-${idx}`}
+                          type="button"
+                          onClick={() =>
+                            onTaskClick?.({
+                              person: entry.name,
+                              slot: taskItem.slot,
+                              task: taskItem.task,
+                              groupNames: taskItem.people,
+                            })
+                          }
+                          className={`rounded-md border px-3 py-2 text-left text-[12px] font-semibold shadow-sm transition hover:shadow ${typeClass}`}
+                        >
+                          <div className="flex items-center justify-between gap-2">
+                            <span>{taskBaseName(taskItem.task)}</span>
+                            <StatusBadge
+                              status={status}
+                              color={statusColors[status || ""]}
+                            />
                           </div>
-                          <StatusBadge
-                            status={status}
-                            color={statusColors[status || ""]}
-                          />
-                        </div>
-                      </button>
-                    );
-                  })
+                          <span className="mt-1 block text-[10px] font-normal text-[#6b6d4b]">
+                            {taskItem.slot.label}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
                 )}
               </div>
             </div>
-          </div>
-        ))}
-      </div>
+          ))}
+        </div>
+      ) : (
+        <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
+          {combined.map((cell) => (
+            <div
+              key={cell.slot.id}
+              className="rounded-lg border border-[#d0c9a4] bg-white/85 shadow-sm"
+            >
+              <div className="flex items-start justify-between gap-2 border-b border-[#e2d7b5] bg-[#f4f1df] px-4 py-3">
+                <div className="flex flex-col">
+                  <span className="text-sm font-semibold text-[#42502d]">
+                    {cell.slot.label}
+                  </span>
+                  {cell.slot.timeRange && (
+                    <span className="text-[11px] text-[#8a8256]">
+                      {cell.slot.timeRange}
+                    </span>
+                  )}
+                </div>
+                <span className="rounded-full bg-[#eef2d9] px-2 py-[2px] text-[10px] font-semibold uppercase tracking-[0.12em] text-[#4f5730]">
+                  {cell.tasks.length} {cell.tasks.length === 1 ? "task" : "tasks"}
+                </span>
+              </div>
+
+              <div className="px-4 py-3 space-y-3">
+                <div className="flex flex-wrap gap-2">
+                  {cell.names.length ? (
+                    cell.names.map((name) => (
+                      <span
+                        key={name}
+                        className="inline-flex items-center rounded-full bg-[#eef5dd] px-3 py-1 text-[12px] font-semibold text-[#42502d]"
+                      >
+                        {name}
+                      </span>
+                    ))
+                  ) : (
+                    <span className="text-[11px] italic text-[#7a7f54]">
+                      No one assigned yet.
+                    </span>
+                  )}
+                </div>
+
+                <div className="space-y-2">
+                  {cell.tasks.length === 0 ? (
+                    <p className="text-[11px] italic text-[#7a7f54]">
+                      No tasks listed for this block.
+                    </p>
+                  ) : (
+                    cell.tasks.map((task) => {
+                      const participants =
+                        task.people.length > 0 ? task.people : cell.names;
+                      const primaryPerson = participants[0] || "Team";
+                      const includesUser = normalizedUser
+                        ? participants.some((p) => p.toLowerCase() === normalizedUser)
+                        : false;
+                      const meta = taskMetaMap[taskBaseName(task.task)];
+                      const status = meta?.status;
+                      const typeClass = typeColorClasses(meta?.typeColor);
+
+                      return (
+                        <button
+                          key={`${cell.slot.id}-${task.task}`}
+                          type="button"
+                          onClick={() =>
+                            onTaskClick?.({
+                              person: primaryPerson,
+                              slot: cell.slot,
+                              task: task.task,
+                              groupNames: participants,
+                            })
+                          }
+                          className={`w-full rounded-md border px-3 py-2 text-left shadow-sm transition hover:shadow ${typeClass} ${
+                            includesUser ? "ring-2 ring-[#d2e4a0]" : ""
+                          }`}
+                        >
+                          <div className="flex items-start justify-between gap-2">
+                            <div>
+                              <div className="font-semibold text-[#42502d]">
+                                {task.task}
+                              </div>
+                              <div className="text-[11px] text-[#7a7f54] space-y-1">
+                                <div className="flex flex-wrap gap-1">
+                                  {participants.length
+                                    ? participants.map((p) => {
+                                        const isMe =
+                                          normalizedUser &&
+                                          p.toLowerCase() === normalizedUser;
+                                        return (
+                                          <span
+                                            key={p}
+                                            className={`rounded-full px-2 py-[2px] text-[11px] font-semibold ${
+                                              isMe
+                                                ? "bg-[#a0b764] text-white"
+                                                : "bg-[#eef2d9] text-[#3f4b29]"
+                                            }`}
+                                          >
+                                            {isMe ? `${p} (you)` : p}
+                                          </span>
+                                        );
+                                      })
+                                    : "No names yet"}
+                                </div>
+                                {includesUser && (
+                                  <span className="inline-flex items-center rounded-full bg-[#f1edd8] px-2 py-[1px] text-[10px] font-semibold text-[#4f4b33]">
+                                    You&apos;re on this task
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                            <StatusBadge
+                              status={status}
+                              color={statusColors[status || ""]}
+                            />
+                          </div>
+                        </button>
+                      );
+                    })
+                  )}
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
 
       {!hasTasks && (
         <p className="text-sm text-[#7a7f54] italic">
