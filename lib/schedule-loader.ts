@@ -19,6 +19,7 @@ export type ScheduleData = {
   people: string[];
   slots: Slot[];
   cells: string[][];
+  reportFlags?: boolean[];
   scheduleDate?: string;
   reportTime?: string;
   taskResetTime?: string;
@@ -228,7 +229,7 @@ export async function loadScheduleData(): Promise<ScheduleData> {
         resolution.databaseMeta || (await retrieveDatabase(resolution.databaseId));
       const metaProps = dbMeta?.properties || {};
       slotKeys = Object.keys(metaProps).filter(
-        (key) => key !== "Person"
+        (key) => key !== "Person" && key !== "Report"
       );
       if (!resolution.scheduleDate && dbMeta?.title) {
         resolution.scheduleDate = notionTitleToPlainText(dbMeta.title);
@@ -239,7 +240,9 @@ export async function loadScheduleData(): Promise<ScheduleData> {
         metaErr
       );
       const firstProps = pages[0].properties || {};
-      slotKeys = Object.keys(firstProps).filter((key) => key !== "Person");
+      slotKeys = Object.keys(firstProps).filter(
+        (key) => key !== "Person" && key !== "Report"
+      );
     }
 
     const slotEntries = slotKeys.map((key) => {
@@ -265,6 +268,7 @@ export async function loadScheduleData(): Promise<ScheduleData> {
 
     const people: string[] = [];
     const cells: string[][] = [];
+    const reportFlags: boolean[] = [];
 
     for (const page of pages) {
       const personName = getPlainText(page.properties?.["Person"]);
@@ -273,6 +277,7 @@ export async function loadScheduleData(): Promise<ScheduleData> {
       people.push(personName);
 
       const rowTasks: string[] = [];
+      const reportFlag = Boolean(page.properties?.["Report"]?.checkbox);
 
       for (const key of orderedKeys) {
         const prop = page.properties?.[key];
@@ -281,12 +286,14 @@ export async function loadScheduleData(): Promise<ScheduleData> {
       }
 
       cells.push(rowTasks);
+      reportFlags.push(reportFlag);
     }
 
     return {
       people,
       slots,
       cells,
+      reportFlags,
       scheduleDate: resolution.scheduleDate,
       reportTime: resolution.reportTime,
       taskResetTime: resolution.taskResetTime,

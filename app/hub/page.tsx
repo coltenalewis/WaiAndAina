@@ -15,6 +15,7 @@ type ScheduleResponse = {
   people: string[];
   slots: Slot[];
   cells: string[][];
+  reportFlags?: boolean[];
   scheduleDate?: string;
   reportTime?: string;
   taskResetTime?: string;
@@ -210,6 +211,7 @@ export default function HubSchedulePage() {
   const [currentUserType, setCurrentUserType] = useState<string | null>(null);
   const [currentSlotId, setCurrentSlotId] = useState<string | null>(null);
   const [isOnline, setIsOnline] = useState<boolean>(true);
+  const [knownUsers, setKnownUsers] = useState<string[]>([]);
   const scheduleScrollRef = useRef<HTMLDivElement | null>(null);
 
   const [activeView, setActiveView] = useState<"schedule" | "myTasks">(
@@ -235,6 +237,16 @@ export default function HubSchedulePage() {
   const [animalOverlay, setAnimalOverlay] = useState<AnimalProfile | null>(null);
   const [animalLookupError, setAnimalLookupError] = useState<string | null>(null);
   const animalFetchInFlight = useRef(false);
+  const [reportOpen, setReportOpen] = useState(false);
+  const [reportStatus, setReportStatus] = useState<Record<string, string>>({});
+  const [reportComments, setReportComments] = useState<Record<string, string>>({});
+  const [reportSubmitting, setReportSubmitting] = useState(false);
+  const [reportError, setReportError] = useState<string | null>(null);
+  const [requestName, setRequestName] = useState("");
+  const [requestDescription, setRequestDescription] = useState("");
+  const [requestTypeOptions, setRequestTypeOptions] = useState<string[]>([]);
+  const [requestType, setRequestType] = useState("");
+  const [requestSubmitting, setRequestSubmitting] = useState(false);
 
   useEffect(() => {
     if (!animalOverlay) return undefined;
@@ -465,11 +477,119 @@ export default function HubSchedulePage() {
     (currentUserType || "").toLowerCase() === "external volunteer";
   const showFullTaskDetail = !modalIsMeal;
 
+
   // Get logged-in user from session
   useEffect(() => {
     const session = loadSession();
     if (session?.name) setCurrentUserName(session.name);
     if (session?.userType) setCurrentUserType(session.userType);
+  }, []);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetch("/api/request/options");
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const json = await res.json();
+        const options = Array.isArray(json.requestTypes)
+          ? json.requestTypes.map((opt: any) => opt.name || opt)
+          : [];
+        setRequestTypeOptions(options);
+        setRequestType((prev) => prev || options[0] || "");
+      } catch (err) {
+        console.error("Failed to load request options", err);
+      }
+    })();
+  }, []);
+
+  const handleReportSubmit = async () => {
+    if (!currentUserName || !data) return;
+    setReportSubmitting(true);
+    setReportError(null);
+
+    try {
+      const updates = reportRows.map(async (row) => {
+        const base = taskBaseName(row.task);
+        const status = reportStatus[base] || "";
+        const comment = reportComments[base]?.trim() || "";
+
+        if (status) {
+          await fetch("/api/task", {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ name: base, status }),
+          });
+        }
+
+        if (comment) {
+          await fetch("/api/task", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              name: base,
+              comment: `${currentUserName} : ${comment}`,
+            }),
+          });
+        }
+      });
+
+      await Promise.all(updates);
+
+      if (requestName.trim() && requestDescription.trim()) {
+        setRequestSubmitting(true);
+        await fetch("/api/request", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            name: requestName.trim(),
+            description: requestDescription.trim(),
+            user: currentUserName,
+            requestType,
+            anonymous: false,
+          }),
+        });
+        setRequestName("");
+        setRequestDescription("");
+      }
+
+      const rowIndex = data.people.findIndex(
+        (p) => p.toLowerCase() === currentUserName.toLowerCase()
+      );
+      if (rowIndex !== -1) {
+        await fetch("/api/schedule/update", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            person: data.people[rowIndex],
+            slotId: "Report",
+            reportValue: true,
+          }),
+        });
+      }
+
+      setReportOpen(false);
+    } catch (err) {
+      console.error("Failed to submit report", err);
+      setReportError("Unable to submit the report. Please try again.");
+    } finally {
+      setReportSubmitting(false);
+      setRequestSubmitting(false);
+    }
+  };
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetch("/api/users");
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const json = await res.json();
+        if (Array.isArray(json.users)) {
+          setKnownUsers(json.users.map((user: any) => user.name || user).filter(Boolean));
+        }
+      } catch (err) {
+        console.error("Failed to load users list", err);
+      }
+    })();
   }, []);
 
   // Track online/offline status so we can present cached data in read-only mode
@@ -712,42 +832,55 @@ export default function HubSchedulePage() {
     [workSlots]
   );
 
-  type CombinedCell = {
+  type ShiftTaskCell = {
     slot: Slot;
-    names: string[];
     tasks: { task: string; people: string[] }[];
   };
 
-  const combineSlotAssignments = useCallback(
-    (targetSlots: Slot[]): CombinedCell[] => {
+  const shiftTaskAssignments = useCallback(
+    (targetSlots: Slot[]): ShiftTaskCell[] => {
       if (!data) return [];
+
+      const knownUserSet = new Set(
+        knownUsers.map((user) => user.toLowerCase().trim())
+      );
 
       return targetSlots.map((slot) => {
         const slotIdx = data.slots.findIndex((s) => s.id === slot.id);
         if (slotIdx === -1) {
-          return { slot, names: [], tasks: [] };
+          return { slot, tasks: [] };
         }
 
-        const nameSet = new Set<string>();
         const taskMap: Record<string, Set<string>> = {};
 
         data.people.forEach((person, rowIdx) => {
           const cell = (data.cells[rowIdx]?.[slotIdx] ?? "").trim();
           if (!cell) return;
 
-          const tasks = splitCellTasks(cell);
-          tasks.forEach((task) => {
-            const key = taskBaseName(task);
-            if (!key) return;
-            nameSet.add(person);
-            if (!taskMap[key]) taskMap[key] = new Set();
-            taskMap[key].add(person);
-          });
+          const normalizedPerson = person.toLowerCase().trim();
+          const isKnownUser = knownUserSet.has(normalizedPerson);
+
+          if (isKnownUser) {
+            const tasks = splitCellTasks(cell);
+            tasks.forEach((task) => {
+              const key = taskBaseName(task);
+              if (!key) return;
+              if (!taskMap[key]) taskMap[key] = new Set();
+              taskMap[key].add(person);
+            });
+          } else {
+            const taskName = person.trim();
+            if (!taskName) return;
+            const assignedPeople = splitCellTasks(cell).map(taskBaseName).filter(Boolean);
+            if (!taskMap[taskName]) taskMap[taskName] = new Set();
+            assignedPeople.forEach((assigned) => {
+              taskMap[taskName].add(assigned);
+            });
+          }
         });
 
         return {
           slot,
-          names: Array.from(nameSet),
           tasks: Object.entries(taskMap).map(([task, people]) => ({
             task,
             people: Array.from(people),
@@ -755,24 +888,23 @@ export default function HubSchedulePage() {
         };
       });
     },
-    [data]
+    [data, knownUsers]
   );
 
-  const eveningCombined = useMemo(
-    () => combineSlotAssignments(eveningSlots),
-    [combineSlotAssignments, eveningSlots]
+  const eveningShiftTasks = useMemo(
+    () => shiftTaskAssignments(eveningSlots),
+    [eveningSlots, shiftTaskAssignments]
+  );
+  const weekendShiftTasks = useMemo(
+    () => shiftTaskAssignments(weekendSlots),
+    [shiftTaskAssignments, weekendSlots]
   );
 
-  const weekendCombined = useMemo(
-    () => combineSlotAssignments(weekendSlots),
-    [combineSlotAssignments, weekendSlots]
+  const eveningHasContent = eveningShiftTasks.some(
+    (cell) => cell.tasks.length > 0
   );
-
-  const eveningHasContent = eveningCombined.some(
-    (cell) => cell.tasks.length > 0 || cell.names.length > 0
-  );
-  const weekendHasContent = weekendCombined.some(
-    (cell) => cell.tasks.length > 0 || cell.names.length > 0
+  const weekendHasContent = weekendShiftTasks.some(
+    (cell) => cell.tasks.length > 0
   );
 
   const showEveningSection = !isExternalVolunteer && eveningHasContent;
@@ -818,6 +950,65 @@ export default function HubSchedulePage() {
       }[]
     );
   }, [data, currentUserName, workSlots]);
+
+  const reportRows = useMemo(() => {
+    if (!myTasks.length) return [];
+    const unique = new Map<string, { task: string; groupNames: string[] }>();
+    myTasks.forEach((entry) => {
+      const base = taskBaseName(entry.task);
+      if (!base) return;
+      if (!unique.has(base)) {
+        unique.set(base, { task: entry.task, groupNames: entry.groupNames });
+      }
+    });
+    return Array.from(unique.values());
+  }, [myTasks]);
+
+  const scheduleReportFlag = useMemo(() => {
+    if (!data || !currentUserName) return false;
+    const rowIndex = data.people.findIndex(
+      (p) => p.toLowerCase() === currentUserName.toLowerCase()
+    );
+    if (rowIndex === -1) return false;
+    return Boolean(data.reportFlags?.[rowIndex]);
+  }, [data, currentUserName]);
+
+  useEffect(() => {
+    if (!reportRows.length) return;
+    setReportStatus((prev) => {
+      const next = { ...prev };
+      reportRows.forEach((row) => {
+        const base = taskBaseName(row.task);
+        if (!next[base]) {
+          next[base] = taskMetaMap[base]?.status || "";
+        }
+      });
+      return next;
+    });
+  }, [reportRows, taskMetaMap]);
+
+  useEffect(() => {
+    if (!data || !currentUserName || scheduleReportFlag) return;
+    if (!data.scheduleDate) return;
+    const now = new Date();
+    const dateFormatter = new Intl.DateTimeFormat("en-US", {
+      timeZone: "Pacific/Honolulu",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    });
+    const timeFormatter = new Intl.DateTimeFormat("en-US", {
+      timeZone: "Pacific/Honolulu",
+      hour: "2-digit",
+      hour12: false,
+    });
+    const hawaiiDate = dateFormatter.format(now);
+    const hawaiiHour = Number(timeFormatter.format(now));
+    if (hawaiiDate !== data.scheduleDate) return;
+    if (hawaiiHour >= 14) {
+      setReportOpen(true);
+    }
+  }, [currentUserName, data, scheduleReportFlag]);
 
   // Meal assignments
   const mealAssignments: MealAssignment[] = useMemo(() => {
@@ -1320,11 +1511,10 @@ async function handleTaskClick(taskPayload: TaskClickPayload) {
           !error &&
           data &&
           showEveningSection && (
-            <ShiftBoard
+            <ShiftTaskTable
               title="Evening Schedule"
               description="Evening shift tasks that can be completed between 5:30 PM and 10:00 PM."
-              combined={eveningCombined}
-              layout="person"
+              slots={eveningShiftTasks}
               onTaskClick={handleTaskClick}
               taskMetaMap={taskMetaMap}
               statusColors={statusColorLookup}
@@ -1336,11 +1526,10 @@ async function handleTaskClick(taskPayload: TaskClickPayload) {
           !error &&
           data &&
           showWeekendSection && (
-            <ShiftBoard
+            <ShiftTaskTable
               title="Weekend Schedule"
               description="Weekend shift coverage. Tasks can be completed within the listed time ranges."
-              combined={weekendCombined}
-              layout="person"
+              slots={weekendShiftTasks}
               onTaskClick={handleTaskClick}
               taskMetaMap={taskMetaMap}
               statusColors={statusColorLookup}
@@ -1734,6 +1923,170 @@ async function handleTaskClick(taskPayload: TaskClickPayload) {
         </div>
       )}
 
+      {reportOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4 py-6 backdrop-blur-sm">
+          <div className="max-h-[85vh] w-full max-w-3xl overflow-y-auto rounded-2xl border border-[#d0c9a4] bg-[#f8f4e3] p-6 shadow-2xl">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <p className="text-xs uppercase tracking-[0.16em] text-[#7a7f54]">
+                  Daily report
+                </p>
+                <h3 className="mt-1 text-xl font-semibold text-[#3e4c24]">
+                  Update today&apos;s tasks
+                </h3>
+                <p className="mt-1 text-sm text-[#6b6d4b]">
+                  Quick status updates and notes for today&apos;s assignments.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setReportOpen(false)}
+                className="rounded-full border border-[#d0c9a4] bg-white/80 px-3 py-1 text-xs font-semibold text-[#6b6d4b] hover:bg-[#ece7d0]"
+              >
+                Close
+              </button>
+            </div>
+
+            <div className="mt-5 space-y-4">
+              {reportRows.length === 0 && (
+                <p className="text-sm text-[#7a7f54]">No tasks assigned today.</p>
+              )}
+              {reportRows.map((row) => {
+                const base = taskBaseName(row.task);
+                const currentStatus = reportStatus[base] || "";
+                const currentComment = reportComments[base] || "";
+                const includesUser = row.groupNames.some(
+                  (p) => p.toLowerCase() === (currentUserName || "").toLowerCase()
+                );
+                const slotForTask =
+                  myTasks.find((task) => taskBaseName(task.task) === base)?.slot ||
+                  data?.slots?.[0];
+
+                return (
+                  <div
+                    key={base}
+                    className={`rounded-lg border border-[#e2d7b5] bg-white/80 p-4 shadow-sm ${
+                      includesUser ? "ring-2 ring-[#d2e4a0]" : ""
+                    }`}
+                  >
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (!slotForTask) return;
+                          handleTaskClick({
+                            person: currentUserName || row.groupNames[0] || "Team",
+                            slot: slotForTask,
+                            task: row.task,
+                            groupNames: row.groupNames,
+                          });
+                        }}
+                        className="text-left text-base font-semibold text-[#3e4c24] underline decoration-[#8fae4c] underline-offset-4"
+                      >
+                        {base}
+                      </button>
+                      <span className="text-[11px] uppercase tracking-[0.12em] text-[#7a7f54]">
+                        {row.groupNames.length}{" "}
+                        {row.groupNames.length === 1 ? "person" : "people"}
+                      </span>
+                    </div>
+
+                    <div className="mt-3 grid gap-3 md:grid-cols-[180px_1fr]">
+                      <label className="text-xs font-semibold uppercase tracking-[0.12em] text-[#6b6f4c]">
+                        Status
+                        <select
+                          value={currentStatus}
+                          onChange={(e) =>
+                            setReportStatus((prev) => ({
+                              ...prev,
+                              [base]: e.target.value,
+                            }))
+                          }
+                          className="mt-1 w-full rounded-md border border-[#d0c9a4] bg-white px-3 py-2 text-sm text-[#3b4224] focus:border-[#8fae4c] focus:outline-none"
+                        >
+                          <option value="">Select status</option>
+                          {statusOptions.map((opt) => (
+                            <option key={opt.name} value={opt.name}>
+                              {opt.name}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <label className="text-xs font-semibold uppercase tracking-[0.12em] text-[#6b6f4c]">
+                        Comment / extra notes
+                        <textarea
+                          value={currentComment}
+                          onChange={(e) =>
+                            setReportComments((prev) => ({
+                              ...prev,
+                              [base]: e.target.value,
+                            }))
+                          }
+                          placeholder="Add a quick note for this task"
+                          className="mt-1 min-h-[90px] w-full rounded-md border border-[#d0c9a4] bg-white px-3 py-2 text-sm text-[#3b4224] focus:border-[#8fae4c] focus:outline-none"
+                        />
+                      </label>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            <div className="mt-6 rounded-xl border border-[#e2d7b5] bg-white/80 p-4 shadow-sm">
+              <h4 className="text-sm font-semibold text-[#3e4c24]">New request</h4>
+              <p className="mt-1 text-xs text-[#6b6d4b]">
+                Need something? Add a request right from your report.
+              </p>
+              <div className="mt-3 grid gap-3 md:grid-cols-2">
+                <input
+                  value={requestName}
+                  onChange={(e) => setRequestName(e.target.value)}
+                  placeholder="Request name"
+                  className="w-full rounded-md border border-[#d0c9a4] bg-white px-3 py-2 text-sm text-[#3b4224] focus:border-[#8fae4c] focus:outline-none"
+                />
+                <select
+                  value={requestType}
+                  onChange={(e) => setRequestType(e.target.value)}
+                  className="w-full rounded-md border border-[#d0c9a4] bg-white px-3 py-2 text-sm text-[#3b4224] focus:border-[#8fae4c] focus:outline-none"
+                >
+                  {requestTypeOptions.map((type) => (
+                    <option key={type} value={type}>
+                      {type}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <textarea
+                value={requestDescription}
+                onChange={(e) => setRequestDescription(e.target.value)}
+                placeholder="Describe what you need"
+                className="mt-3 min-h-[90px] w-full rounded-md border border-[#d0c9a4] bg-white px-3 py-2 text-sm text-[#3b4224] focus:border-[#8fae4c] focus:outline-none"
+              />
+            </div>
+
+            {reportError && (
+              <p className="mt-4 rounded-lg border border-[#e2d7b5] bg-[#f9f6e7] px-4 py-3 text-sm text-[#4b5133]">
+                {reportError}
+              </p>
+            )}
+
+            <div className="mt-6 flex flex-wrap items-center justify-between gap-3">
+              <p className="text-xs text-[#6b6d4b]">
+                Submitting marks your report complete for today.
+              </p>
+              <button
+                type="button"
+                onClick={handleReportSubmit}
+                disabled={reportSubmitting || requestSubmitting}
+                className="rounded-md bg-[#8fae4c] px-4 py-2 text-sm font-semibold uppercase tracking-[0.12em] text-[#f9f9ec] shadow-md transition hover:bg-[#7e9c44] disabled:opacity-60"
+              >
+                {reportSubmitting ? "Submitting…" : "Submit report"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {animalOverlay && (
         <div
           className="fixed inset-0 z-[70] flex items-center justify-center bg-black/45 px-4 py-6"
@@ -1972,38 +2325,7 @@ function ShiftBoard({
   currentUserName?: string | null;
 }) {
   const normalizedUser = (currentUserName || "").toLowerCase().trim();
-  const personEntries = useMemo(() => {
-    if (layout !== "person") return [];
-    const map = new Map<
-      string,
-      { name: string; tasks: { task: string; slot: Slot; people: string[] }[] }
-    >();
-
-    combined.forEach((cell) => {
-      const fallbackNames = cell.names.length ? cell.names : ["Unassigned"];
-      fallbackNames.forEach((name) => {
-        if (!map.has(name)) {
-          map.set(name, { name, tasks: [] });
-        }
-      });
-
-      cell.tasks.forEach((task) => {
-        const participants = task.people.length ? task.people : fallbackNames;
-        participants.forEach((name) => {
-          if (!map.has(name)) {
-            map.set(name, { name, tasks: [] });
-          }
-          map.get(name)?.tasks.push({ task: task.task, slot: cell.slot, people: participants });
-        });
-      });
-    });
-
-    return Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name));
-  }, [combined, layout]);
-  const hasTasks =
-    layout === "person"
-      ? personEntries.some((entry) => entry.tasks.length > 0)
-      : combined.some((cell) => cell.tasks.length > 0);
+  const hasTasks = combined.some((cell) => cell.tasks.length > 0);
 
   return (
     <section className="space-y-3">
@@ -2230,6 +2552,131 @@ function ShiftBoard({
             );
           })()}
         </div>
+      )}
+    </section>
+  );
+}
+
+function ShiftTaskTable({
+  title,
+  description,
+  slots,
+  onTaskClick,
+  taskMetaMap,
+  statusColors,
+  currentUserName,
+}: {
+  title: string;
+  description: string;
+  slots: { slot: Slot; tasks: { task: string; people: string[] }[] }[];
+  onTaskClick?: (payload: TaskClickPayload) => void;
+  taskMetaMap: Record<string, TaskMeta>;
+  statusColors: Record<string, string>;
+  currentUserName?: string | null;
+}) {
+  const normalizedUser = (currentUserName || "").toLowerCase().trim();
+  const hasTasks = slots.some((entry) => entry.tasks.length > 0);
+
+  return (
+    <section className="space-y-3">
+      <div className="flex flex-col gap-1">
+        <h3 className="text-xl font-semibold tracking-[0.16em] uppercase text-[#5d7f3b]">
+          {title}
+        </h3>
+        <p className="text-sm text-[#7a7f54]">{description}</p>
+      </div>
+
+      <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
+        {slots.map((entry) => (
+          <div
+            key={entry.slot.id}
+            className="rounded-lg border border-[#d0c9a4] bg-white/85 shadow-sm"
+          >
+            <div className="flex items-start justify-between gap-2 border-b border-[#e2d7b5] bg-[#f4f1df] px-4 py-3">
+              <div className="flex flex-col">
+                <span className="text-sm font-semibold text-[#42502d]">
+                  {entry.slot.label}
+                </span>
+                {entry.slot.timeRange && (
+                  <span className="text-[11px] text-[#8a8256]">
+                    {entry.slot.timeRange}
+                  </span>
+                )}
+              </div>
+              <span className="rounded-full bg-[#eef2d9] px-2 py-[2px] text-[10px] font-semibold uppercase tracking-[0.12em] text-[#4f5730]">
+                {entry.tasks.length} {entry.tasks.length === 1 ? "task" : "tasks"}
+              </span>
+            </div>
+
+            <div className="px-4 py-3 space-y-2">
+              {entry.tasks.length === 0 ? (
+                <p className="text-[11px] italic text-[#7a7f54]">
+                  No tasks listed for this shift.
+                </p>
+              ) : (
+                entry.tasks.map((task) => {
+                  const participants = task.people;
+                  const includesUser = normalizedUser
+                    ? participants.some((p) => p.toLowerCase() === normalizedUser)
+                    : false;
+                  const meta = taskMetaMap[taskBaseName(task.task)];
+                  const status = meta?.status;
+                  const typeClass = typeColorClasses(meta?.typeColor);
+                  const primaryPerson = includesUser
+                    ? currentUserName || participants[0] || "Team"
+                    : participants[0] || currentUserName || "Team";
+
+                  return (
+                    <button
+                      key={`${entry.slot.id}-${task.task}`}
+                      type="button"
+                      onClick={() =>
+                        onTaskClick?.({
+                          person: primaryPerson,
+                          slot: entry.slot,
+                          task: task.task,
+                          groupNames: participants,
+                        })
+                      }
+                      className={`w-full rounded-md border px-3 py-2 text-left shadow-sm transition hover:shadow ${typeClass} ${
+                        includesUser ? "ring-2 ring-[#d2e4a0]" : ""
+                      }`}
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div>
+                          <div className="font-semibold text-[#42502d]">
+                            {task.task}
+                          </div>
+                          <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-[#7a7f54]">
+                            <span className="rounded-full bg-white/80 px-2 py-[2px] text-[10px] font-semibold uppercase tracking-[0.12em] text-[#4f5730]">
+                              {participants.length}{" "}
+                              {participants.length === 1 ? "person" : "people"}
+                            </span>
+                            {includesUser && (
+                              <span className="inline-flex items-center rounded-full bg-[#f1edd8] px-2 py-[1px] text-[10px] font-semibold text-[#4f4b33]">
+                                You&apos;re on this task
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                        <StatusBadge
+                          status={status}
+                          color={statusColors[status || ""]}
+                        />
+                      </div>
+                    </button>
+                  );
+                })
+              )}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {!hasTasks && (
+        <p className="text-sm text-[#7a7f54] italic">
+          No tasks listed for this shift yet.
+        </p>
       )}
     </section>
   );

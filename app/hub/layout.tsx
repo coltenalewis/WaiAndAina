@@ -36,6 +36,7 @@ export default function HubLayout({ children }: { children: ReactNode }) {
   const [mobileWorkOpen, setMobileWorkOpen] = useState(false);
   const [onlineUsers, setOnlineUsers] = useState<string[]>([]);
   const [newlyOnline, setNewlyOnline] = useState<Record<string, boolean>>({});
+  const [checkedCapabilities, setCheckedCapabilities] = useState(false);
 
   const normalizedType = (userType || "").toLowerCase();
   const isExternalVolunteer = normalizedType === "external volunteer";
@@ -52,6 +53,25 @@ export default function HubLayout({ children }: { children: ReactNode }) {
     setUserType(session.userType ?? null);
     setUserTypeColor(session.userTypeColor ?? null);
   }, [router]);
+
+  useEffect(() => {
+    if (!name || checkedCapabilities) return;
+    (async () => {
+      try {
+        const res = await fetch(`/api/user-settings?name=${encodeURIComponent(name)}`);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const json = await res.json();
+        const capabilities = Array.isArray(json.capabilities) ? json.capabilities : [];
+        if (capabilities.length === 0) {
+          router.replace(`/onboarding?name=${encodeURIComponent(name)}&capabilities=1`);
+        }
+      } catch (err) {
+        console.error("Failed to check capabilities", err);
+      } finally {
+        setCheckedCapabilities(true);
+      }
+    })();
+  }, [checkedCapabilities, name, router]);
 
   useEffect(() => {
     if (isInactiveVolunteer && pathname.startsWith("/hub") && pathname !== "/hub/goat") {

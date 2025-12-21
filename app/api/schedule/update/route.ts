@@ -43,7 +43,7 @@ function getTitlePropertyKey(meta: any): string {
 export async function POST(req: Request) {
   try {
     const body = await req.json();
-    const { person, slotId, addTask, removeTask, replaceValue } = body || {};
+    const { person, slotId, addTask, removeTask, replaceValue, reportValue } = body || {};
 
     if (!person || !slotId) {
       return NextResponse.json(
@@ -71,6 +71,14 @@ export async function POST(req: Request) {
         { error: "Person row not found" },
         { status: 404 }
       );
+    }
+
+    const slotMeta = meta?.properties?.[slotId];
+    if (slotMeta?.type === "checkbox") {
+      await updatePage(page.id, {
+        [slotId]: { checkbox: Boolean(reportValue) },
+      });
+      return NextResponse.json({ success: true, value: Boolean(reportValue) });
     }
 
     const currentValue = getPlainText(page.properties?.[slotId]);

@@ -163,6 +163,7 @@ export default function AdminScheduleEditorPage() {
   const [photoUploading, setPhotoUploading] = useState(false);
   const [photoMessage, setPhotoMessage] = useState<string | null>(null);
   const photoInputRef = useRef<HTMLInputElement | null>(null);
+  const lastInlineAddRef = useRef<Record<string, string>>({});
 
   useEffect(() => {
     const session = loadSession();
@@ -480,6 +481,16 @@ export default function AdminScheduleEditorPage() {
   const addInlineTask = (person: string, slot: Slot, taskName: string, existingCount: number) => {
     const trimmed = taskName.trim();
     if (!trimmed) return;
+    const key = `${person}-${slot.id}`;
+    if (lastInlineAddRef.current[key] === trimmed) {
+      return;
+    }
+    lastInlineAddRef.current[key] = trimmed;
+    window.setTimeout(() => {
+      if (lastInlineAddRef.current[key] === trimmed) {
+        delete lastInlineAddRef.current[key];
+      }
+    }, 300);
     handleTaskMove(
       { taskName: trimmed },
       { person, slotId: slot.id, slotLabel: slot.label, targetIndex: existingCount }

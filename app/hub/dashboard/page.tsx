@@ -16,6 +16,7 @@ type ScheduleResponse = {
   people: string[];
   slots: Slot[];
   cells: string[][];
+  reportFlags?: boolean[];
   scheduleDate?: string;
   reportTime?: string;
   taskResetTime?: string;
@@ -57,13 +58,26 @@ function taskBaseName(task: string) {
   return task.split("\n")[0].trim();
 }
 
+function splitCellEntries(cell: string) {
+  if (!cell.trim()) return [];
+  const [firstLine, ...rest] = cell.split("\n");
+  const note = rest.join("\n").trim();
+  return firstLine
+    .split(",")
+    .map((t) => t.trim())
+    .filter(Boolean)
+    .map((t) => (note ? `${t}\n${note}` : t))
+    .filter((entry) => !isOffPlaceholder(entry));
+}
+
 export default function WorkDashboardPage() {
   const router = useRouter();
   const [name, setName] = useState<string | null>(null);
   const [userType, setUserType] = useState<string | null>(null);
-  const [miniTasks, setMiniTasks] = useState<MiniTask[]>([]);
   const [miniLoading, setMiniLoading] = useState(false);
   const [alerts, setAlerts] = useState<string[]>([]);
+  const [mySlots, setMySlots] = useState<Slot[]>([]);
+  const [myCells, setMyCells] = useState<string[]>([]);
 
   useEffect(() => {
     const session = loadSession();
@@ -82,7 +96,6 @@ export default function WorkDashboardPage() {
 
   useEffect(() => {
     if (!name) {
-      setMiniTasks([]);
       return;
     }
     const normalizedName = name.toLowerCase();
@@ -98,14 +111,19 @@ export default function WorkDashboardPage() {
           (p) => p.toLowerCase() === normalizedName
         );
         if (rowIndex === -1) {
-          setMiniTasks([]);
+          setMySlots([]);
+          setMyCells([]);
           return;
         }
 
         const tasks: MiniTask[] = [];
+        const slotList: Slot[] = [];
+        const cellList: string[] = [];
         data.slots.forEach((slot, col) => {
           if (isExternalVolunteer && !/weekend/i.test(slot.label)) return;
           const cell = data.cells[rowIndex]?.[col] || "";
+          slotList.push(slot);
+          cellList.push(cell);
           if (!cell.trim()) return;
           const [firstLine, ...rest] = cell.split("\n");
           const note = rest.join("\n").trim();
@@ -124,7 +142,8 @@ export default function WorkDashboardPage() {
           });
         });
 
-        setMiniTasks(tasks.slice(0, 6));
+        setMySlots(slotList);
+        setMyCells(cellList);
 
         const uniqueTaskNames = Array.from(
           new Set(tasks.map((entry) => taskBaseName(entry.task)))
@@ -231,107 +250,142 @@ export default function WorkDashboardPage() {
           Use the shortcuts below to jump between schedules, requests, guides, and games. The quick toggles above the page also let you swap views instantly.
         </p>
       </div>
-      <div className="grid lg:grid-cols-3 gap-4">
-        <div className="lg:col-span-2 space-y-4">
-          <div className="grid md:grid-cols-2 gap-4">
+      <div className="space-y-4">
+        <div className="rounded-3xl border border-[#c8c49c] bg-gradient-to-br from-[#fefcf3] via-[#f7f4e6] to-[#e8eccd] p-6 shadow-md">
+          <div className="flex flex-wrap items-center justify-between gap-4">
+            <div className="flex items-center gap-4">
+              <span className="text-3xl">📆</span>
+              <div className="flex flex-col">
+                <span className="text-2xl font-semibold text-[#3b4224]">Open schedule</span>
+                <span className="text-xs uppercase tracking-[0.16em] text-[#7a7f54]">Main workspace</span>
+              </div>
+            </div>
             <Link
               href="/hub"
-              className="group md:col-span-2 rounded-3xl border border-[#c8c49c] bg-gradient-to-br from-[#fefcf3] via-[#f7f4e6] to-[#e8eccd] p-6 shadow-md hover:-translate-y-0.5 transition"
+              className="rounded-full bg-[#8fae4c] px-4 py-2 text-xs font-semibold uppercase tracking-[0.12em] text-[#f9f9ec] shadow-sm transition hover:bg-[#7e9c44]"
             >
-              <div className="flex items-center gap-4">
-                <span className="text-3xl">📆</span>
+              View full schedule
+            </Link>
+          </div>
+          <p className="mt-3 text-sm text-[#4b5133] leading-relaxed">
+            View shifts, tasks, and live updates with status changes, notes, and comments. Your personal schedule preview lives right below.
+          </p>
+
+          <div className="mt-4 overflow-auto rounded-xl border border-[#e2dbc0] bg-[#f7f4e6] shadow-inner">
+            {miniLoading && (
+              <p className="p-4 text-sm text-[#7a7f54]">Refreshing your schedule…</p>
+            )}
+            {!miniLoading && mySlots.length === 0 && (
+              <p className="p-4 text-sm text-[#4b5133]">
+                No schedule found for you yet.
+              </p>
+            )}
+            {!miniLoading && mySlots.length > 0 && (
+              <table className="min-w-full border-collapse text-sm">
+                <thead className="bg-[#efe7cf]">
+                  <tr>
+                    <th className="min-w-[140px] border border-[#e0d6b8] px-3 py-2 text-left text-[11px] font-semibold uppercase tracking-[0.12em] text-[#6b7247]">
+                      Name
+                    </th>
+                    {mySlots.map((slot) => (
+                      <th
+                        key={slot.id}
+                        className="min-w-[140px] border border-[#e0d6b8] px-3 py-2 text-left text-[11px] font-semibold uppercase tracking-[0.12em] text-[#6b7247]"
+                      >
+                        <div className="flex flex-col gap-1">
+                          <span>{slot.label}</span>
+                          {slot.timeRange && (
+                            <span className="text-[10px] text-[#7a7f54] normal-case">
+                              {slot.timeRange}
+                            </span>
+                          )}
+                        </div>
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr className="bg-white">
+                    <td className="border border-[#e0d6b8] px-3 py-2 text-sm font-semibold text-[#3b4224]">
+                      {name || "You"}
+                    </td>
+                    {myCells.map((cell, idx) => {
+                      const entries = splitCellEntries(cell);
+                      return (
+                        <td
+                          key={`${mySlots[idx]?.id || idx}-cell`}
+                          className="border border-[#e0d6b8] px-3 py-2 align-top text-[12px] text-[#4b5133]"
+                        >
+                          {entries.length === 0 ? (
+                            <span className="text-[11px] italic text-[#7a7f54]">
+                              —
+                            </span>
+                          ) : (
+                            <ul className="space-y-1">
+                              {entries.map((entry, entryIdx) => (
+                                <li key={`${entry}-${entryIdx}`} className="rounded-md bg-white/70 px-2 py-1">
+                                  <span className="font-semibold text-[#3b4224]">
+                                    {taskBaseName(entry)}
+                                  </span>
+                                  {entry.split("\n")[1] && (
+                                    <span className="mt-1 block whitespace-pre-line text-[11px] text-[#4b5133]">
+                                      {entry.split("\n").slice(1).join("\n")}
+                                    </span>
+                                  )}
+                                </li>
+                              ))}
+                            </ul>
+                          )}
+                        </td>
+                      );
+                    })}
+                  </tr>
+                </tbody>
+              </table>
+            )}
+          </div>
+        </div>
+
+        <div className="grid md:grid-cols-3 gap-4">
+          {quickLinks.map((link) => (
+            <Link
+              key={link.href}
+              href={link.href}
+              className="group rounded-2xl border border-[#d0c9a4] bg-white/80 p-5 shadow-sm hover:-translate-y-0.5 transition"
+            >
+              <div className="flex items-center gap-3">
+                <span className="text-2xl">{link.icon}</span>
                 <div className="flex flex-col">
-                  <span className="text-2xl font-semibold text-[#3b4224]">Open schedule</span>
-                  <span className="text-xs uppercase tracking-[0.16em] text-[#7a7f54]">Main workspace</span>
+                  <span className="text-lg font-semibold text-[#3b4224]">{link.title}</span>
+                  <span className="text-xs uppercase tracking-[0.14em] text-[#7a7f54]">Open {link.title}</span>
                 </div>
               </div>
-              <p className="mt-3 text-sm text-[#4b5133] leading-relaxed">
-                View shifts, tasks, and live updates with status changes, notes, and comments.
-              </p>
+              <p className="mt-3 text-sm text-[#4b5133] leading-relaxed">{link.description}</p>
               <span className="mt-4 inline-flex items-center gap-1 text-sm font-semibold text-[#5d7f3b] underline underline-offset-4">
-                Go to Schedule →
+                Go to {link.title} →
               </span>
             </Link>
-            {quickLinks.map((link) => (
-              <Link
-                key={link.href}
-                href={link.href}
-                className="group rounded-2xl border border-[#d0c9a4] bg-white/80 p-5 shadow-sm hover:-translate-y-0.5 transition"
-              >
-                <div className="flex items-center gap-3">
-                  <span className="text-2xl">{link.icon}</span>
-                  <div className="flex flex-col">
-                    <span className="text-lg font-semibold text-[#3b4224]">{link.title}</span>
-                    <span className="text-xs uppercase tracking-[0.14em] text-[#7a7f54]">Open {link.title}</span>
-                  </div>
-                </div>
-                <p className="mt-3 text-sm text-[#4b5133] leading-relaxed">{link.description}</p>
-                <span className="mt-4 inline-flex items-center gap-1 text-sm font-semibold text-[#5d7f3b] underline underline-offset-4">
-                  Go to {link.title} →
-                </span>
-              </Link>
-            ))}
-          </div>
-
-          {alerts.length > 0 && (
-            <div className="rounded-2xl border border-[#d0c9a4] bg-white/80 p-5 shadow-sm">
-              <div className="flex items-center justify-between gap-2">
-                <h3 className="text-lg font-semibold text-[#3b4224]">Schedule updates</h3>
-                <span className="text-[11px] uppercase tracking-[0.12em] text-[#7a7f54]">
-                  Since last visit
-                </span>
-              </div>
-              <ul className="mt-3 space-y-2 text-sm text-[#4b5133]">
-                {alerts.map((alert, idx) => (
-                  <li key={`${alert}-${idx}`} className="flex items-start gap-2">
-                    <span className="mt-1 h-2 w-2 rounded-full bg-[#8fae4c]" />
-                    <span>{alert}</span>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
+          ))}
         </div>
 
-        <div className="rounded-2xl border border-[#d0c9a4] bg-white/85 p-5 shadow-sm h-full flex flex-col">
-          <div className="flex items-center justify-between gap-2">
-            <div>
-              <p className="text-xs uppercase tracking-[0.18em] text-[#7a7f54]">Mini schedule</p>
-              <h3 className="text-lg font-semibold text-[#3b4224]">Your tasks</h3>
+        {alerts.length > 0 && (
+          <div className="rounded-2xl border border-[#d0c9a4] bg-white/80 p-5 shadow-sm">
+            <div className="flex items-center justify-between gap-2">
+              <h3 className="text-lg font-semibold text-[#3b4224]">Schedule updates</h3>
+              <span className="text-[11px] uppercase tracking-[0.12em] text-[#7a7f54]">
+                Since last visit
+              </span>
             </div>
-            {miniLoading && (
-              <span className="text-[11px] text-[#7a7f54]">Refreshing...</span>
-            )}
+            <ul className="mt-3 space-y-2 text-sm text-[#4b5133]">
+              {alerts.map((alert, idx) => (
+                <li key={`${alert}-${idx}`} className="flex items-start gap-2">
+                  <span className="mt-1 h-2 w-2 rounded-full bg-[#8fae4c]" />
+                  <span>{alert}</span>
+                </li>
+              ))}
+            </ul>
           </div>
-          <div className="mt-3 space-y-3 overflow-y-auto max-h-[420px] pr-1">
-            {miniTasks.length === 0 && !miniLoading && (
-              <p className="text-sm text-[#4b5133] leading-relaxed">
-                No tasks found in your schedule preview.
-              </p>
-            )}
-            {miniTasks.map((item, idx) => (
-              <div
-                key={`${item.slot}-${idx}-${item.task}`}
-                className="rounded-xl border border-[#e2dbc0] bg-[#f7f4e6] px-4 py-3 shadow-sm"
-              >
-                <div className="flex items-center justify-between gap-2">
-                  <span className="text-xs uppercase tracking-[0.14em] text-[#6b7247]">
-                    {item.slot}
-                  </span>
-                  <span className="text-[11px] text-[#7a7f54]">{item.timeRange}</span>
-                </div>
-                <p className="mt-2 text-sm font-semibold text-[#3b4224] leading-snug">
-                  {item.task.split("\n")[0]}
-                </p>
-                {item.task.split("\n")[1] && (
-                  <p className="mt-1 text-xs text-[#4b5133] whitespace-pre-line">
-                    {item.task.split("\n").slice(1).join("\n")}
-                  </p>
-                )}
-              </div>
-            ))}
-          </div>
-        </div>
+        )}
       </div>
     </div>
   );

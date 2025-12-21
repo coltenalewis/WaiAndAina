@@ -18,6 +18,7 @@ function OnboardingContent() {
   const searchParams = useSearchParams();
 
   const [selectedName, setSelectedName] = useState<string>("");
+  const [currentPass, setCurrentPass] = useState("");
   const [newPass, setNewPass] = useState("");
   const [confirmPass, setConfirmPass] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -30,6 +31,7 @@ function OnboardingContent() {
   const lastFetchedName = useRef<string>("");
 
   const presetName = searchParams.get("name") || "";
+  const capabilitiesOnly = searchParams.get("capabilities") === "1";
   const isNameLocked = !!presetName;
   useEffect(() => {
     if (presetName) {
@@ -72,13 +74,12 @@ function OnboardingContent() {
 
   const canSubmit = useMemo(() => {
     const nameValue = selectedName.trim();
-    return (
-      !!nameValue &&
-      newPass.trim().length >= 4 &&
-      newPass === confirmPass &&
-      !submitting
-    );
-  }, [confirmPass, newPass, selectedName, submitting]);
+    if (!nameValue || submitting) return false;
+    if (capabilitiesOnly) {
+      return currentPass.trim().length > 0;
+    }
+    return newPass.trim().length >= 4 && newPass === confirmPass;
+  }, [capabilitiesOnly, confirmPass, currentPass, newPass, selectedName, submitting]);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -96,8 +97,8 @@ function OnboardingContent() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           name: nameValue,
-          currentPassword: DEFAULT_PASSCODE,
-          newPassword: newPass,
+          currentPassword: capabilitiesOnly ? currentPass : DEFAULT_PASSCODE,
+          newPassword: capabilitiesOnly ? null : newPass,
           capabilities: selectedCapabilities,
         }),
       });
@@ -109,12 +110,19 @@ function OnboardingContent() {
         return;
       }
 
-      setSuccess("Passcode updated! Signing you in…");
+      setSuccess(
+        capabilitiesOnly
+          ? "Capabilities updated! Taking you to the dashboard…"
+          : "Passcode updated! Signing you in…"
+      );
 
       const loginRes = await fetch("/api/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: nameValue, password: newPass }),
+        body: JSON.stringify({
+          name: nameValue,
+          password: capabilitiesOnly ? currentPass : newPass,
+        }),
       });
 
       if (loginRes.ok) {
@@ -156,15 +164,25 @@ function OnboardingContent() {
           </div>
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
             <div>
-              <h1 className="text-2xl font-semibold text-[#33401e]">Set your new passcode</h1>
+              <h1 className="text-2xl font-semibold text-[#33401e]">
+                {capabilitiesOnly ? "Select your capabilities" : "Set your new passcode"}
+              </h1>
               <p className="text-sm text-[#5a5f3b]">
-                Use your starter code ({DEFAULT_PASSCODE}) once, then pick a secure passcode to unlock the Work Dashboard and future onboarding resources.
+                {capabilitiesOnly
+                  ? "Choose the areas you can help with so we can match you to the right tasks."
+                  : `Use your starter code (${DEFAULT_PASSCODE}) once, then pick a secure passcode to unlock the Work Dashboard and future onboarding resources.`}
               </p>
             </div>
             <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.14em] text-[#556036]">
-              <span className="rounded-full bg-[#a0b764] px-3 py-1 text-white shadow">Step 1</span>
-              <span className="rounded-full border border-[#d0c9a4] bg-white px-3 py-1 text-[#5d7f3b] shadow-sm">Credentials</span>
-              <span className="rounded-full border border-[#d0c9a4] bg-white px-3 py-1 text-[#5d7f3b] shadow-sm">Guides (soon)</span>
+              <span className="rounded-full bg-[#a0b764] px-3 py-1 text-white shadow">
+                {capabilitiesOnly ? "Step 2" : "Step 1"}
+              </span>
+              <span className="rounded-full border border-[#d0c9a4] bg-white px-3 py-1 text-[#5d7f3b] shadow-sm">
+                {capabilitiesOnly ? "Capabilities" : "Credentials"}
+              </span>
+              <span className="rounded-full border border-[#d0c9a4] bg-white px-3 py-1 text-[#5d7f3b] shadow-sm">
+                Guides (soon)
+              </span>
             </div>
           </div>
         </header>
@@ -196,39 +214,59 @@ function OnboardingContent() {
                   </p>
                 ) : (
                   <p className="text-[11px] text-[#7a7f54]">
-                    Enter your own name to update your passcode. New users should contact an admin for access.
+                    {capabilitiesOnly
+                      ? "Enter your name to update your capabilities. New users should contact an admin for access."
+                      : "Enter your own name to update your passcode. New users should contact an admin for access."}
                   </p>
                 )}
               </div>
 
-              <div className="grid gap-3 sm:grid-cols-2">
+              {capabilitiesOnly ? (
                 <div className="space-y-1">
                   <label className="text-xs font-semibold uppercase tracking-[0.14em] text-[#6b6f4c]">
-                    New passcode
+                    Current passcode
                   </label>
                   <input
                     type="password"
-                    value={newPass}
-                    onChange={(e) => setNewPass(e.target.value)}
+                    value={currentPass}
+                    onChange={(e) => setCurrentPass(e.target.value)}
                     className="w-full rounded-md border border-[#c8cba0] bg-[#f1edd8] px-3 py-2 text-sm text-[#3b4224] shadow-inner focus:outline-none focus:ring-2 focus:ring-[#8fae4c]"
-                    placeholder="Create a passcode"
+                    placeholder="Enter your current passcode"
                   />
-                  <p className="text-[11px] text-[#7a7f54]">At least 4 characters.</p>
+                  <p className="text-[11px] text-[#7a7f54]">
+                    We&apos;ll keep your existing passcode and only update your capabilities.
+                  </p>
                 </div>
+              ) : (
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div className="space-y-1">
+                    <label className="text-xs font-semibold uppercase tracking-[0.14em] text-[#6b6f4c]">
+                      New passcode
+                    </label>
+                    <input
+                      type="password"
+                      value={newPass}
+                      onChange={(e) => setNewPass(e.target.value)}
+                      className="w-full rounded-md border border-[#c8cba0] bg-[#f1edd8] px-3 py-2 text-sm text-[#3b4224] shadow-inner focus:outline-none focus:ring-2 focus:ring-[#8fae4c]"
+                      placeholder="Create a passcode"
+                    />
+                    <p className="text-[11px] text-[#7a7f54]">At least 4 characters.</p>
+                  </div>
 
-                <div className="space-y-1">
-                  <label className="text-xs font-semibold uppercase tracking-[0.14em] text-[#6b6f4c]">
-                    Confirm passcode
-                  </label>
-                  <input
-                    type="password"
-                    value={confirmPass}
-                    onChange={(e) => setConfirmPass(e.target.value)}
-                    className="w-full rounded-md border border-[#c8cba0] bg-[#f1edd8] px-3 py-2 text-sm text-[#3b4224] shadow-inner focus:outline-none focus:ring-2 focus:ring-[#8fae4c]"
-                    placeholder="Re-enter passcode"
-                  />
+                  <div className="space-y-1">
+                    <label className="text-xs font-semibold uppercase tracking-[0.14em] text-[#6b6f4c]">
+                      Confirm passcode
+                    </label>
+                    <input
+                      type="password"
+                      value={confirmPass}
+                      onChange={(e) => setConfirmPass(e.target.value)}
+                      className="w-full rounded-md border border-[#c8cba0] bg-[#f1edd8] px-3 py-2 text-sm text-[#3b4224] shadow-inner focus:outline-none focus:ring-2 focus:ring-[#8fae4c]"
+                      placeholder="Re-enter passcode"
+                    />
+                  </div>
                 </div>
-              </div>
+              )}
 
               <div className="space-y-2 rounded-lg border border-[#e2d7b5] bg-[#f9f6e7] px-4 py-3">
                 <div className="flex items-center justify-between gap-2">
