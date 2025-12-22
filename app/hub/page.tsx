@@ -84,36 +84,6 @@ type TaskDetails = {
 type TaskTypeOption = { name: string; color: string };
 type StatusOption = { name: string; color: string };
 
-const TASK_CACHE_KEY = "hub-task-cache";
-
-function readCachedTask(taskName: string): TaskDetails | null {
-  if (typeof window === "undefined") return null;
-  try {
-    const raw = localStorage.getItem(TASK_CACHE_KEY);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw) as Record<string, TaskDetails & { cachedAt?: number }>;
-    return parsed?.[taskName] ?? null;
-  } catch (err) {
-    console.error("Failed to read cached task", err);
-    return null;
-  }
-}
-
-function writeCachedTask(taskName: string, details: TaskDetails) {
-  if (typeof window === "undefined") return;
-  try {
-    const raw = localStorage.getItem(TASK_CACHE_KEY);
-    const parsed = raw ? (JSON.parse(raw) as Record<string, TaskDetails & { cachedAt?: number }>) : {};
-    const next = { ...parsed, [taskName]: { ...details, cachedAt: Date.now() } };
-    // Keep cache from growing unbounded
-    const entries = Object.entries(next).sort(([, a], [, b]) => (b.cachedAt || 0) - (a.cachedAt || 0));
-    const trimmed = Object.fromEntries(entries.slice(0, 50));
-    localStorage.setItem(TASK_CACHE_KEY, JSON.stringify(trimmed));
-  } catch (err) {
-    console.error("Failed to cache task", err);
-  }
-}
-
 function splitCellTasks(cell: string): string[] {
   if (!cell.trim()) return [];
 
@@ -1058,8 +1028,6 @@ export default function HubSchedulePage() {
       estimatedTime: "",
     };
 
-    const cached = readCachedTask(taskName);
-
     try {
       const res = await fetch(`/api/task?name=${encodeURIComponent(taskName)}`);
       if (!res.ok) {
@@ -1080,14 +1048,9 @@ export default function HubSchedulePage() {
         estimatedTime: json.estimatedTime || "",
       };
       applyDetails(detail);
-      writeCachedTask(taskName, detail);
     } catch (e) {
       console.error("Failed to load task details:", e);
-      if (cached) {
-        applyDetails(cached);
-      } else {
-        setModalDetails(emptyDetails);
-      }
+      setModalDetails(emptyDetails);
     } finally {
       if (!quiet) setModalLoading(false);
     }
