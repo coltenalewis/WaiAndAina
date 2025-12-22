@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useMemo, useState } from "react";
 
 export type ChatMessage = { role: "user" | "assistant"; content: string; status?: "thinking" };
 
@@ -52,14 +52,12 @@ export function HubAssistantChat({
   variant = "floating",
   title = "Hub AI assistant",
   subtitle = "Ask about schedules, guides, or farm workflow",
-  storageKey = "hub-assistant",
   contextHint = "",
   placeholder = "Ask for help with tasks, guides, or schedules",
 }: {
   variant?: "floating" | "panel";
   title?: string;
   subtitle?: string;
-  storageKey?: string;
   contextHint?: string;
   placeholder?: string;
 }) {
@@ -72,26 +70,6 @@ export function HubAssistantChat({
   const [chatInput, setChatInput] = useState("");
   const [chatLoading, setChatLoading] = useState(false);
   const [open, setOpen] = useState(variant === "panel");
-
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    const cached = window.localStorage.getItem(storageKey);
-    if (cached) {
-      try {
-        const parsed = JSON.parse(cached) as ChatMessage[];
-        if (Array.isArray(parsed) && parsed.length) {
-          setMessages(parsed);
-        }
-      } catch (err) {
-        console.warn("Failed to parse cached assistant chat", err);
-      }
-    }
-  }, [storageKey]);
-
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    window.localStorage.setItem(storageKey, JSON.stringify(messages));
-  }, [messages, storageKey]);
 
   const handleSubmit = async (e?: React.FormEvent) => {
     e?.preventDefault();
