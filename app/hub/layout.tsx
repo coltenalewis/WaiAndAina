@@ -636,7 +636,6 @@ export default function HubLayout({ children }: { children: ReactNode }) {
       {canAccessWork && (
         <HubAssistantChat
           variant="floating"
-          storageKey="hub-work-assistant"
           title="Hub AI assistant"
           subtitle="Ask about guides, schedules, and data across the hub"
           contextHint={assistantContext}

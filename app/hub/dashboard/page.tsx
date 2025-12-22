@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { loadSession } from "@/lib/session";
@@ -26,6 +26,8 @@ type MiniTask = {
   slot: string;
   timeRange: string;
   task: string;
+  status: string;
+  commentCount: number;
 };
 
 const quickLinks = [
@@ -78,6 +80,7 @@ export default function WorkDashboardPage() {
   const [alerts, setAlerts] = useState<string[]>([]);
   const [mySlots, setMySlots] = useState<Slot[]>([]);
   const [myCells, setMyCells] = useState<string[]>([]);
+  const previousSnapshotRef = useRef<MiniTask[] | null>(null);
 
   useEffect(() => {
     const session = loadSession();
@@ -99,8 +102,6 @@ export default function WorkDashboardPage() {
       return;
     }
     const normalizedName = name.toLowerCase();
-    const snapshotKey = `hub-dashboard-snapshot-${normalizedName}`;
-
     async function loadMiniSchedule() {
       setMiniLoading(true);
       try {
@@ -138,6 +139,8 @@ export default function WorkDashboardPage() {
               slot: slot.label,
               timeRange: slot.timeRange,
               task: entry,
+              status: "",
+              commentCount: 0,
             });
           });
         });
@@ -186,20 +189,12 @@ export default function WorkDashboardPage() {
           };
         });
 
-        const previousRaw = typeof window !== "undefined" ? localStorage.getItem(snapshotKey) : null;
-        let previous: { tasks?: any[] } | null = null;
-        if (previousRaw) {
-          try {
-            previous = JSON.parse(previousRaw);
-          } catch (err) {
-            console.warn("Failed to parse schedule snapshot", err);
-          }
-        }
+        const previous = previousSnapshotRef.current;
         const nextAlerts: string[] = [];
 
-        if (previous?.tasks) {
+        if (previous?.length) {
           const prevMap = new Map(
-            previous.tasks.map((task: any) => [task.task, task])
+            previous.map((task) => [task.task, task])
           );
 
           currentSnapshot.forEach((task) => {
@@ -216,7 +211,7 @@ export default function WorkDashboardPage() {
             }
           });
 
-          previous.tasks.forEach((task: any) => {
+          previous.forEach((task) => {
             const stillAssigned = currentSnapshot.some((entry) => entry.task === task.task);
             if (!stillAssigned) {
               nextAlerts.push(`Task removed: ${task.task}.`);
@@ -225,9 +220,7 @@ export default function WorkDashboardPage() {
         }
 
         setAlerts(nextAlerts);
-        if (typeof window !== "undefined") {
-          localStorage.setItem(snapshotKey, JSON.stringify({ tasks: currentSnapshot, updatedAt: Date.now() }));
-        }
+        previousSnapshotRef.current = currentSnapshot;
       } finally {
         setMiniLoading(false);
       }
