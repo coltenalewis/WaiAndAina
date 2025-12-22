@@ -145,6 +145,12 @@ export async function resolveScheduleDatabase() {
           equals: "Settings",
         },
       },
+      sorts: [
+        {
+          property: "Selected Schedule",
+          direction: "descending",
+        },
+      ],
     }),
     queryDatabase(settingsDb.id, {
       page_size: 1,
@@ -154,6 +160,12 @@ export async function resolveScheduleDatabase() {
           equals: "Report Time",
         },
       },
+      sorts: [
+        {
+          property: "Selected Schedule",
+          direction: "descending",
+        },
+      ],
     }),
     queryDatabase(settingsDb.id, {
       page_size: 1,
@@ -163,6 +175,12 @@ export async function resolveScheduleDatabase() {
           equals: "Task Reset Time",
         },
       },
+      sorts: [
+        {
+          property: "Selected Schedule",
+          direction: "descending",
+        },
+      ],
     }),
   ]);
 
