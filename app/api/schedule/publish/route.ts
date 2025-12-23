@@ -164,7 +164,7 @@ export async function POST(req: Request) {
       id: page.id,
       name: getPlainText(page.properties?.[titleKey]),
     }))
-    .filter((entry) => entry.name);
+    .filter((entry: { id: string; name: string }) => entry.name);
 
   for (const entry of liveNames) {
     if (!stagingNames.has(entry.name)) {
