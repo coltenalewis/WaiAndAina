@@ -112,6 +112,15 @@ export async function POST(req: Request) {
 
     const nextValue = joinTasks(tasks);
 
+    if (slotMeta?.type === "multi_select") {
+      await updatePage(page.id, {
+        [slotId]: {
+          multi_select: tasks.map((task) => ({ name: task })),
+        },
+      });
+      return NextResponse.json({ success: true, value: tasks });
+    }
+
     await updatePage(page.id, {
       [slotId]: {
         rich_text: [
