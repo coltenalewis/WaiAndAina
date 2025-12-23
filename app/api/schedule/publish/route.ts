@@ -122,7 +122,7 @@ export async function POST(req: Request) {
 
   const liveRows = await queryAllDatabasePages(liveId);
   const livePages = liveRows.results || [];
-  const liveByName = new Map(
+  const liveByName = new Map<string, any>(
     livePages.map((page: any) => [
       getPlainText(page.properties?.[titleKey]),
       page,
