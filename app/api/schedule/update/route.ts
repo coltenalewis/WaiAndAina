@@ -94,8 +94,13 @@ export async function POST(req: Request) {
     }
 
     const currentValue = getPlainText(page.properties?.[slotId]);
-    let tasks =
-      replaceValue !== undefined ? splitTasks(replaceValue) : splitTasks(currentValue);
+    const baseValue =
+      replaceValue !== undefined ? replaceValue : currentValue;
+    const normalizedValue =
+      slotMeta?.type === "multi_select"
+        ? baseValue.split("\n")[0] || ""
+        : baseValue;
+    let tasks = splitTasks(normalizedValue);
 
     if (removeTask) {
       tasks = tasks.filter(
