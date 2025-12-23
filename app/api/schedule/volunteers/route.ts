@@ -63,14 +63,16 @@ export async function POST(req: Request) {
   );
   const scheduleRows = schedulePages.results || [];
 
-  const existingRows = scheduleRows.map((page: any) => ({
+  const existingRows: { id: string; name: string }[] = scheduleRows.map(
+    (page: any) => ({
     id: page.id,
     name: getPlainText(page.properties?.[scheduleTitleKey]),
-  }));
+  })
+  );
 
   const users = await queryAllDatabasePages(USERS_DB_ID);
-  const volunteerNames = (users.results || [])
-    .map((page: any) => {
+  const volunteerNames: string[] = (users.results || [])
+    .map((page: any): { name: string; role: string } => {
       const props = page.properties || {};
       return {
         name: getPlainText(props["Name"]),
@@ -78,10 +80,15 @@ export async function POST(req: Request) {
       };
     })
     .filter((entry: { name: string; role: string }) => entry.name)
-    .filter((entry: { name: string; role: string }) => entry.role.toLowerCase() === "volunteer")
+    .filter(
+      (entry: { name: string; role: string }) =>
+        entry.role.toLowerCase() === "volunteer"
+    )
     .map((entry: { name: string; role: string }) => entry.name);
 
-  const volunteerSet = new Set(volunteerNames.map((n) => n.toLowerCase()));
+  const volunteerSet = new Set(
+    volunteerNames.map((name: string) => name.toLowerCase())
+  );
 
   const missing = volunteerNames.filter(
     (name) =>
