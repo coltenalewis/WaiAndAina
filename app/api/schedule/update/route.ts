@@ -122,7 +122,9 @@ export async function POST(req: Request) {
       const existingNames = new Set(
         existingOptions.map((opt: any) => (opt?.name || "").toLowerCase())
       );
-      const trimmedTasks = tasks.map((task) => task.trim()).filter(Boolean);
+      const trimmedTasks = Array.from(
+        new Set(tasks.map((task) => task.trim()).filter(Boolean))
+      );
       const missing = trimmedTasks.filter(
         (task) => !existingNames.has(task.toLowerCase())
       );
@@ -130,7 +132,7 @@ export async function POST(req: Request) {
       if (missing.length) {
         const nextOptions = [
           ...existingOptions,
-          ...missing.map((name: string) => ({ name })),
+          ...missing.map((name: string) => ({ name, color: "default" })),
         ];
         await updateDatabase(databaseId, {
           [slotId]: {

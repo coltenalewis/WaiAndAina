@@ -1262,15 +1262,6 @@ export default function HubSchedulePage() {
     node.scrollBy({ left: delta, behavior: "smooth" });
   };
 
-  const scrollToSlot = (slotId: string) => {
-    const node = scheduleScrollRef.current;
-    if (!node) return;
-    const target = node.querySelector(`[data-slot-id="${slotId}"]`);
-    if (target && target instanceof HTMLElement) {
-      target.scrollIntoView({ behavior: "smooth", inline: "center", block: "nearest" });
-    }
-  };
-
   useEffect(() => {
     function updateCurrentSlot(schedule: ScheduleResponse | null) {
       const minutesNow = getNowMinutes();
@@ -1606,18 +1597,24 @@ async function handleTaskClick(taskPayload: TaskClickPayload) {
                 </label>
               </div>
 
-              {activeView === "schedule" && weekdayWorkSlots.length > 0 && (
-                <div className="mt-3 flex flex-wrap gap-2">
-                  {weekdayWorkSlots.map((slot) => (
-                    <button
-                      key={slot.id}
-                      type="button"
-                      onClick={() => scrollToSlot(slot.id)}
-                      className="rounded-full border border-[#d0c9a4] bg-white/80 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-[#4a5b2a] shadow-sm transition hover:bg-[#f1edd8]"
-                    >
-                      {slot.label}
-                    </button>
-                  ))}
+              {activeView === "schedule" && (
+                <div className="mt-3 flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => scrollSchedule("left")}
+                    className="rounded-full border border-[#d0c9a4] bg-white/90 px-3 py-2 text-sm font-semibold text-[#4b522d] shadow hover:-translate-x-0.5 transition"
+                    aria-label="Scroll schedule left"
+                  >
+                    ←
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => scrollSchedule("right")}
+                    className="rounded-full border border-[#d0c9a4] bg-white/90 px-3 py-2 text-sm font-semibold text-[#4b522d] shadow hover:translate-x-0.5 transition"
+                    aria-label="Scroll schedule right"
+                  >
+                    →
+                  </button>
                 </div>
               )}
 
