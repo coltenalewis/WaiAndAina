@@ -1547,23 +1547,13 @@ async function handleTaskClick(taskPayload: TaskClickPayload) {
 
         {showStandardSection && (
           <section className="space-y-3">
-            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-              <div>
-                <h2 className="text-2xl font-semibold tracking-[0.18em] uppercase text-[#5d7f3b] mb-1">
-                  {scheduleTitle}
-                </h2>
-                <p className="text-sm text-[#7a7f54]">
-                  Click any task to see its details, description, and who you are
-                  assigned with. Evening shift columns now sit beside the daytime schedule for a single view.
-                </p>
-              </div>
-              <a
-                href="/hub/request?create=1"
-                className="inline-flex items-center justify-center rounded-full border border-[#d0c9a4] bg-white/80 px-4 py-2 text-xs font-semibold uppercase tracking-[0.14em] text-[#4a5b2a] shadow-sm transition hover:bg-[#f1edd8]"
-              >
-                New request
-              </a>
-            </div>
+            <h2 className="text-2xl font-semibold tracking-[0.18em] uppercase text-[#5d7f3b] mb-1">
+              {scheduleTitle}
+            </h2>
+            <p className="text-sm text-[#7a7f54]">
+              Click any task to see its details, description, and who you are
+              assigned with. Evening shift columns now sit beside the daytime schedule for a single view.
+            </p>
             {scheduleOutdated && !loading && scheduleOutdatedMessage ? (
               <p className="mt-1 text-xs font-semibold text-red-700">
                 {scheduleOutdatedMessage}
