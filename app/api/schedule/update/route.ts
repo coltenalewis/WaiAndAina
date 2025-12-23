@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { queryDatabase, retrieveDatabase, updatePage } from "@/lib/notion";
+import { queryDatabase, retrieveDatabase, updateDatabase, updatePage } from "@/lib/notion";
 import { resolveScheduleDatabase } from "@/lib/schedule-loader";
 
 function getPlainText(prop: any): string {
@@ -118,12 +118,35 @@ export async function POST(req: Request) {
     const nextValue = joinTasks(tasks);
 
     if (slotMeta?.type === "multi_select") {
+      const existingOptions = slotMeta.multi_select?.options || [];
+      const existingNames = new Set(
+        existingOptions.map((opt: any) => (opt?.name || "").toLowerCase())
+      );
+      const trimmedTasks = tasks.map((task) => task.trim()).filter(Boolean);
+      const missing = trimmedTasks.filter(
+        (task) => !existingNames.has(task.toLowerCase())
+      );
+
+      if (missing.length) {
+        const nextOptions = [
+          ...existingOptions,
+          ...missing.map((name: string) => ({ name })),
+        ];
+        await updateDatabase(databaseId, {
+          [slotId]: {
+            multi_select: {
+              options: nextOptions,
+            },
+          },
+        });
+      }
+
       await updatePage(page.id, {
         [slotId]: {
-          multi_select: tasks.map((task) => ({ name: task })),
+          multi_select: trimmedTasks.map((task) => ({ name: task })),
         },
       });
-      return NextResponse.json({ success: true, value: tasks });
+      return NextResponse.json({ success: true, value: trimmedTasks });
     }
 
     await updatePage(page.id, {

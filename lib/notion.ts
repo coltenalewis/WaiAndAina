@@ -201,6 +201,27 @@ export async function updatePage(pageId: string, properties: any) {
   return res.json();
 }
 
+export async function updateDatabase(databaseId: string, properties: any) {
+  const res = await fetch(`${NOTION_BASE_URL}/databases/${databaseId}`, {
+    method: "PATCH",
+    headers: {
+      Authorization: `Bearer ${NOTION_TOKEN}`,
+      "Notion-Version": NOTION_VERSION,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ properties }),
+    cache: "no-store",
+  });
+
+  if (!res.ok) {
+    const text = await res.text();
+    console.error("Notion update database error:", res.status, text);
+    throw new Error(`Failed to update Notion database: ${res.status}`);
+  }
+
+  return res.json();
+}
+
 export async function archivePage(pageId: string, archived = true) {
   const res = await fetch(`${NOTION_BASE_URL}/pages/${pageId}`, {
     method: "PATCH",
