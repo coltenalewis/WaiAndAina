@@ -2,7 +2,7 @@
 import { NextResponse } from "next/server";
 import { loadScheduleData } from "@/lib/schedule-loader";
 
-export async function GET() {
+export async function GET(req: Request) {
   if (!process.env.NOTION_SCHEDULE_DATABASE_ID) {
     return NextResponse.json(
       { error: "NOTION_SCHEDULE_DATABASE_ID is not set" },
@@ -11,7 +11,10 @@ export async function GET() {
   }
 
   try {
-    const data = await loadScheduleData();
+    const { searchParams } = new URL(req.url);
+    const dateLabel = searchParams.get("date") || undefined;
+    const staging = searchParams.get("staging") === "1";
+    const data = await loadScheduleData({ dateLabel, staging });
     return NextResponse.json(data, {
       headers: {
         "Cache-Control": "no-store, max-age=0",

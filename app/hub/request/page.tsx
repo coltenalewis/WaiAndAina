@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { loadSession } from "@/lib/session";
 
 type Option = { name: string; color: string };
@@ -49,6 +50,7 @@ type RequestDetail = RequestSummary & {
 };
 
 export default function HubRequestPage() {
+  const searchParams = useSearchParams();
   const [requests, setRequests] = useState<RequestSummary[]>([]);
   const [loading, setLoading] = useState(false);
   const [sessionName, setSessionName] = useState("");
@@ -85,6 +87,12 @@ export default function HubRequestPage() {
     fetchRequests();
     fetchOptions();
   }, []);
+
+  useEffect(() => {
+    if (searchParams?.get("create") === "1") {
+      setCreateOpen(true);
+    }
+  }, [searchParams]);
 
   async function fetchOptions() {
     try {

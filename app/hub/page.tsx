@@ -171,6 +171,13 @@ export default function HubSchedulePage() {
   const [modalDetails, setModalDetails] = useState<TaskDetails | null>(null);
   const [modalLoading, setModalLoading] = useState(false);
   const [modalIsMeal, setModalIsMeal] = useState(false);
+  const taskDetailsRequestRef = useRef(0);
+  const [weekSchedules, setWeekSchedules] = useState<
+    Record<string, ScheduleResponse | null>
+  >({});
+  const [weekDays, setWeekDays] = useState<{ day: string; dateLabel: string }[]>(
+    []
+  );
   const [commentDraft, setCommentDraft] = useState("");
   const [commentSubmitting, setCommentSubmitting] = useState(false);
 
@@ -213,12 +220,81 @@ export default function HubSchedulePage() {
   }, [statusOptions]);
 
   const scheduleDateLabel = data?.scheduleDate;
+  const formatDateLabel = useCallback((date: Date) => {
+    const month = `${date.getMonth() + 1}`.padStart(2, "0");
+    const day = `${date.getDate()}`.padStart(2, "0");
+    const year = date.getFullYear();
+    return `${month}/${day}/${year}`;
+  }, []);
   const scheduleDateObj = useMemo(() => {
     if (!scheduleDateLabel) return null;
     const parsed = new Date(scheduleDateLabel);
     if (Number.isNaN(parsed.getTime())) return null;
     return parsed;
   }, [scheduleDateLabel]);
+  const scheduleDayName = useMemo(() => {
+    if (!scheduleDateObj) return null;
+    return scheduleDateObj.toLocaleDateString("en-US", { weekday: "long" });
+  }, [scheduleDateObj]);
+
+  useEffect(() => {
+    if (!scheduleDateObj) return;
+    const dayIndex = scheduleDateObj.getDay();
+    const diffToMonday = (dayIndex + 6) % 7;
+    const monday = new Date(scheduleDateObj);
+    monday.setDate(scheduleDateObj.getDate() - diffToMonday);
+
+    const nextWeekDays = Array.from({ length: 7 }, (_, idx) => {
+      const date = new Date(monday);
+      date.setDate(monday.getDate() + idx);
+      return {
+        day: date.toLocaleDateString("en-US", { weekday: "long" }),
+        dateLabel: formatDateLabel(date),
+      };
+    });
+
+    setWeekDays(nextWeekDays);
+  }, [formatDateLabel, scheduleDateObj]);
+
+  useEffect(() => {
+    if (!weekDays.length || !scheduleDateLabel) return;
+    let cancelled = false;
+
+    const loadWeek = async () => {
+      const next: Record<string, ScheduleResponse | null> = {};
+
+      await Promise.all(
+        weekDays.map(async ({ dateLabel }) => {
+          if (dateLabel === scheduleDateLabel && data) {
+            next[dateLabel] = data;
+            return;
+          }
+          try {
+            const res = await fetch(
+              `/api/schedule?date=${encodeURIComponent(dateLabel)}`,
+              { cache: "no-store" }
+            );
+            const json = await res.json();
+            if (res.ok && json?.people && json?.slots) {
+              const hasContent = json.people.length || json.slots.length;
+              next[dateLabel] = hasContent ? json : null;
+            }
+          } catch (err) {
+            console.error("Failed to load future schedule", err);
+          }
+        })
+      );
+
+      if (!cancelled) {
+        setWeekSchedules(next);
+      }
+    };
+
+    loadWeek();
+    return () => {
+      cancelled = true;
+    };
+  }, [data, scheduleDateLabel, weekDays]);
 
   const isScheduleToday = useMemo(() => {
     if (!scheduleDateObj) return false;
@@ -416,8 +492,10 @@ export default function HubSchedulePage() {
     return <div className="space-y-2">{pieces}</div>;
   }
 
-  const isExternalVolunteer =
-    (currentUserType || "").toLowerCase() === "external volunteer";
+  const normalizedUserType = (currentUserType || "").toLowerCase();
+  const isExternalVolunteer = normalizedUserType === "external volunteer";
+  const isVolunteer = normalizedUserType === "volunteer";
+  const isAdmin = normalizedUserType === "admin";
   const showFullTaskDetail = !modalIsMeal;
 
 
@@ -737,6 +815,30 @@ export default function HubSchedulePage() {
     tasks: { task: string; people: string[] }[];
   };
 
+  type EveningDayRow = {
+    day: string;
+    condoCleaning: string[];
+    eveningShift: string[];
+    isActiveDay: boolean;
+  };
+
+  type EveningIndexTask = {
+    task: string;
+    slot: Slot;
+    people: string[];
+  };
+
+  type WeekendSlotSummary = {
+    slot: Slot;
+    people: string[];
+  };
+
+  type WeekendIndexTask = {
+    task: string;
+    slot: Slot;
+    people: string[];
+  };
+
   const shiftTaskAssignments = useCallback(
     (targetSlots: Slot[]): ShiftTaskCell[] => {
       if (!data) return [];
@@ -791,24 +893,225 @@ export default function HubSchedulePage() {
     [data, knownUsers]
   );
 
-  const eveningShiftTasks = useMemo(
-    () => shiftTaskAssignments(eveningSlots),
-    [eveningSlots, shiftTaskAssignments]
-  );
-  const weekendShiftTasks = useMemo(
-    () => shiftTaskAssignments(weekendSlots),
-    [shiftTaskAssignments, weekendSlots]
-  );
 
-  const eveningHasContent = eveningShiftTasks.some(
-    (cell) => cell.tasks.length > 0
-  );
-  const weekendHasContent = weekendShiftTasks.some(
-    (cell) => cell.tasks.length > 0
-  );
+  const weekendScheduleSummary = useMemo(() => {
+    if (!data || weekendSlots.length === 0) {
+      return { slotRows: [] as WeekendSlotSummary[], indexTasks: [] as WeekendIndexTask[] };
+    }
 
-  const showEveningSection = !isExternalVolunteer && eveningHasContent;
-  const showWeekendSection = weekendHasContent;
+    const sortNames = (names: string[]) => {
+      const unique = Array.from(new Set(names.filter(Boolean)));
+      if (!currentUserName) return unique;
+      const normalizedUser = currentUserName.toLowerCase();
+      const meIndex = unique.findIndex(
+        (name) => name.toLowerCase() === normalizedUser
+      );
+      if (meIndex === -1) return unique;
+      return [unique[meIndex], ...unique.filter((_, idx) => idx !== meIndex)];
+    };
+
+    const slotRows = weekendSlots.map((slot) => {
+      const slotIdx = data.slots.findIndex((s) => s.id === slot.id);
+      if (slotIdx === -1) {
+        return { slot, people: [] };
+      }
+
+      const people = data.people.filter((person, rowIdx) => {
+        const cell = (data.cells[rowIdx]?.[slotIdx] ?? "").trim();
+        return splitCellTasks(cell).length > 0;
+      });
+
+      return { slot, people: sortNames(people) };
+    });
+
+    const indexMap = new Map<string, { task: string; slot: Slot; people: Set<string> }>();
+    weekendSlots.forEach((slot) => {
+      const slotIdx = data.slots.findIndex((s) => s.id === slot.id);
+      if (slotIdx === -1) return;
+      data.people.forEach((person, rowIdx) => {
+        const cell = (data.cells[rowIdx]?.[slotIdx] ?? "").trim();
+        if (!cell) return;
+        splitCellTasks(cell).forEach((task) => {
+          const base = taskBaseName(task);
+          if (!base) return;
+          const key = base.toLowerCase();
+          if (!indexMap.has(key)) {
+            indexMap.set(key, { task: base, slot, people: new Set() });
+          }
+          indexMap.get(key)?.people.add(person);
+        });
+      });
+    });
+
+    const indexTasks = Array.from(indexMap.values())
+      .filter((entry) => entry.people.size > 1)
+      .map((entry) => ({
+        task: entry.task,
+        slot: entry.slot,
+        people: Array.from(entry.people),
+      }))
+      .sort((a, b) => a.task.localeCompare(b.task));
+
+    return { slotRows, indexTasks };
+  }, [currentUserName, data, weekendSlots]);
+
+  const eveningScheduleSummary = useMemo(() => {
+    const baseRows: EveningDayRow[] = (weekDays.length
+      ? weekDays.map((entry) => entry.day)
+      : [
+          "Monday",
+          "Tuesday",
+          "Wednesday",
+          "Thursday",
+          "Friday",
+          "Saturday",
+          "Sunday",
+        ]
+    ).map((day) => ({
+      day,
+      condoCleaning: [],
+      eveningShift: [],
+      isActiveDay: scheduleDayName?.toLowerCase() === day.toLowerCase(),
+    }));
+
+    const sortNames = (names: string[]) => {
+      const unique = Array.from(new Set(names.filter(Boolean)));
+      if (!currentUserName) return unique;
+      const normalizedUser = currentUserName.toLowerCase();
+      const meIndex = unique.findIndex(
+        (name) => name.toLowerCase() === normalizedUser
+      );
+      if (meIndex === -1) return unique;
+      return [unique[meIndex], ...unique.filter((_, idx) => idx !== meIndex)];
+    };
+
+    const collectAssignments = (schedule: ScheduleResponse | null) => {
+      if (!schedule) {
+        return { condo: [] as string[], evening: [] as string[] };
+      }
+
+      const slotIndices = schedule.slots
+        .filter(
+          (slot) =>
+            /evening/i.test(slot.label) &&
+            !/weekend/i.test(slot.label) &&
+            !slot.isMeal
+        )
+        .map((slot) => schedule.slots.findIndex((s) => s.id === slot.id))
+        .filter((idx) => idx !== -1);
+
+      const condo = new Set<string>();
+      const evening = new Set<string>();
+
+      schedule.people.forEach((person, rowIdx) => {
+        let hasNonCondo = false;
+        let hasCondo = false;
+
+        slotIndices.forEach((idx) => {
+          const cell = (schedule.cells[rowIdx]?.[idx] ?? "").trim();
+          if (!cell) return;
+          const tasks = splitCellTasks(cell);
+          tasks.forEach((task) => {
+            const base = taskBaseName(task);
+            if (!base) return;
+            if (/condo cleaning/i.test(base)) {
+              hasCondo = true;
+            } else {
+              hasNonCondo = true;
+            }
+          });
+        });
+
+        if (hasCondo) condo.add(person);
+        if (hasNonCondo) evening.add(person);
+      });
+
+      return {
+        condo: sortNames(Array.from(condo)),
+        evening: sortNames(Array.from(evening)),
+      };
+    };
+
+    const dayRows = baseRows.map((row) => {
+      const dayEntry = weekDays.find(
+        (entry) => entry.day.toLowerCase() === row.day.toLowerCase()
+      );
+      const schedule =
+        dayEntry?.dateLabel && weekSchedules[dayEntry.dateLabel]
+          ? weekSchedules[dayEntry.dateLabel]
+          : row.isActiveDay
+            ? data
+            : null;
+      const { condo, evening } = collectAssignments(schedule || null);
+      return {
+        ...row,
+        condoCleaning: condo,
+        eveningShift: evening,
+      };
+    });
+
+    const indexMap = new Map<
+      string,
+      { task: string; slot: Slot; people: Set<string> }
+    >();
+
+    if (data) {
+      const eveningIndices = eveningSlots
+        .map((slot) => ({
+          slot,
+          idx: data.slots.findIndex((s) => s.id === slot.id),
+        }))
+        .filter((entry) => entry.idx !== -1);
+
+      data.people.forEach((person, rowIdx) => {
+        eveningIndices.forEach(({ slot, idx }) => {
+          const cell = (data.cells[rowIdx]?.[idx] ?? "").trim();
+          if (!cell) return;
+          splitCellTasks(cell).forEach((task) => {
+            const base = taskBaseName(task);
+            if (!base) return;
+            const key = base.toLowerCase();
+            if (!indexMap.has(key)) {
+              indexMap.set(key, { task: base, slot, people: new Set() });
+            }
+            indexMap.get(key)?.people.add(person);
+          });
+        });
+      });
+    }
+
+    const indexTasks = Array.from(indexMap.values())
+      .filter((entry) => entry.people.size > 1)
+      .filter((entry) => !/condo cleaning/i.test(entry.task))
+      .map((entry) => ({
+        task: entry.task,
+        slot: entry.slot,
+        people: Array.from(entry.people),
+      }))
+      .sort((a, b) => a.task.localeCompare(b.task));
+
+    return { dayRows, indexTasks };
+  }, [
+    currentUserName,
+    data,
+    eveningSlots,
+    scheduleDayName,
+    weekDays,
+    weekSchedules,
+  ]);
+
+  const eveningHasContent =
+    eveningScheduleSummary.dayRows.some(
+      (row) => row.condoCleaning.length > 0 || row.eveningShift.length > 0
+    ) || eveningScheduleSummary.indexTasks.length > 0;
+  const weekendHasContent =
+    weekendScheduleSummary.slotRows.some((row) => row.people.length > 0) ||
+    weekendScheduleSummary.indexTasks.length > 0;
+
+  const showEveningSection =
+    !isExternalVolunteer && (isVolunteer || isAdmin || eveningHasContent);
+  const showWeekendSection =
+    isVolunteer || isAdmin || isExternalVolunteer || weekendHasContent;
 
   const myTasks = useMemo(() => {
     if (!data || !currentUserName) return [] as {
@@ -999,9 +1302,11 @@ export default function HubSchedulePage() {
     opts: { quiet?: boolean } = {}
   ) {
     const { quiet = false } = opts;
+    const requestId = ++taskDetailsRequestRef.current;
     if (!quiet) setModalLoading(true);
 
     const applyDetails = (detail: TaskDetails) => {
+      if (taskDetailsRequestRef.current !== requestId) return;
       setModalDetails(detail);
       const metaPayload = {
         status: detail.status || "",
@@ -1050,9 +1355,13 @@ export default function HubSchedulePage() {
       applyDetails(detail);
     } catch (e) {
       console.error("Failed to load task details:", e);
-      setModalDetails(emptyDetails);
+      if (taskDetailsRequestRef.current === requestId) {
+        setModalDetails(emptyDetails);
+      }
     } finally {
-      if (!quiet) setModalLoading(false);
+      if (!quiet && taskDetailsRequestRef.current === requestId) {
+        setModalLoading(false);
+      }
     }
   }
 
@@ -1238,13 +1547,23 @@ async function handleTaskClick(taskPayload: TaskClickPayload) {
 
         {showStandardSection && (
           <section className="space-y-3">
-            <h2 className="text-2xl font-semibold tracking-[0.18em] uppercase text-[#5d7f3b] mb-1">
-              {scheduleTitle}
-            </h2>
-            <p className="text-sm text-[#7a7f54]">
-              Click any task to see its details, description, and who you are
-              assigned with. Evening shift columns now sit beside the daytime schedule for a single view.
-            </p>
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <h2 className="text-2xl font-semibold tracking-[0.18em] uppercase text-[#5d7f3b] mb-1">
+                  {scheduleTitle}
+                </h2>
+                <p className="text-sm text-[#7a7f54]">
+                  Click any task to see its details, description, and who you are
+                  assigned with. Evening shift columns now sit beside the daytime schedule for a single view.
+                </p>
+              </div>
+              <a
+                href="/hub/request?create=1"
+                className="inline-flex items-center justify-center rounded-full border border-[#d0c9a4] bg-white/80 px-4 py-2 text-xs font-semibold uppercase tracking-[0.14em] text-[#4a5b2a] shadow-sm transition hover:bg-[#f1edd8]"
+              >
+                New request
+              </a>
+            </div>
             {scheduleOutdated && !loading && scheduleOutdatedMessage ? (
               <p className="mt-1 text-xs font-semibold text-red-700">
                 {scheduleOutdatedMessage}
@@ -1287,6 +1606,27 @@ async function handleTaskClick(taskPayload: TaskClickPayload) {
                   Only me
                 </label>
               </div>
+
+              {activeView === "schedule" && (
+                <div className="mt-3 flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => scrollSchedule("left")}
+                    className="rounded-full border border-[#d0c9a4] bg-white/90 px-3 py-2 text-sm font-semibold text-[#4b522d] shadow hover:-translate-x-0.5 transition"
+                    aria-label="Scroll schedule left"
+                  >
+                    ←
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => scrollSchedule("right")}
+                    className="rounded-full border border-[#d0c9a4] bg-white/90 px-3 py-2 text-sm font-semibold text-[#4b522d] shadow hover:translate-x-0.5 transition"
+                    aria-label="Scroll schedule right"
+                  >
+                    →
+                  </button>
+                </div>
+              )}
 
               <div className="mt-3 rounded-lg bg-[#a0b764] px-3 py-3">
                 <div className="rounded-md bg-[#f8f4e3]">
@@ -1385,10 +1725,11 @@ async function handleTaskClick(taskPayload: TaskClickPayload) {
           !error &&
           data &&
           showEveningSection && (
-            <ShiftTaskTable
+            <EveningScheduleTable
               title="Evening Schedule"
-              description="Evening shift tasks that can be completed between 5:30 PM and 10:00 PM."
-              slots={eveningShiftTasks}
+              description="Evening shift coverage laid out by weekday with a rollup of shared evening tasks."
+              dayRows={eveningScheduleSummary.dayRows}
+              indexTasks={eveningScheduleSummary.indexTasks}
               onTaskClick={handleTaskClick}
               taskMetaMap={taskMetaMap}
               statusColors={statusColorLookup}
@@ -1400,10 +1741,11 @@ async function handleTaskClick(taskPayload: TaskClickPayload) {
           !error &&
           data &&
           showWeekendSection && (
-            <ShiftTaskTable
+            <WeekendScheduleTable
               title="Weekend Schedule"
-              description="Weekend shift coverage. Tasks can be completed within the listed time ranges."
-              slots={weekendShiftTasks}
+              description="Weekend shift coverage with assignments by shift."
+              slotRows={weekendScheduleSummary.slotRows}
+              indexTasks={weekendScheduleSummary.indexTasks}
               onTaskClick={handleTaskClick}
               taskMetaMap={taskMetaMap}
               statusColors={statusColorLookup}
@@ -2588,6 +2930,377 @@ function ShiftTaskTable({
   );
 }
 
+function EveningScheduleTable({
+  title,
+  description,
+  dayRows,
+  indexTasks,
+  onTaskClick,
+  taskMetaMap,
+  statusColors,
+  currentUserName,
+}: {
+  title: string;
+  description: string;
+  dayRows: {
+    day: string;
+    condoCleaning: string[];
+    eveningShift: string[];
+    isActiveDay: boolean;
+  }[];
+  indexTasks: { task: string; slot: Slot; people: string[] }[];
+  onTaskClick?: (payload: TaskClickPayload) => void;
+  taskMetaMap: Record<string, TaskMeta>;
+  statusColors: Record<string, string>;
+  currentUserName?: string | null;
+}) {
+  const normalizedUser = (currentUserName || "").toLowerCase().trim();
+
+  const renderNames = (names: string[]) => {
+    if (!names.length) {
+      return <span className="text-[11px] italic text-[#7a7f54]">—</span>;
+    }
+
+    const ordered = normalizedUser
+      ? [
+          ...names.filter((name) => name.toLowerCase() === normalizedUser),
+          ...names.filter((name) => name.toLowerCase() !== normalizedUser),
+        ]
+      : names;
+
+    return (
+      <div className="flex flex-wrap gap-1.5">
+        {ordered.map((name) => {
+          const isMe =
+            normalizedUser && name.toLowerCase() === normalizedUser;
+          return (
+            <span
+              key={name}
+              className={`rounded-full px-2 py-[2px] text-[11px] font-semibold ${
+                isMe
+                  ? "bg-[#a0b764] text-white"
+                  : "bg-[#eef2d9] text-[#3f4b29]"
+              }`}
+            >
+              {isMe ? `${name} (you)` : name}
+            </span>
+          );
+        })}
+      </div>
+    );
+  };
+
+  return (
+    <section className="space-y-3">
+      <div className="flex flex-col gap-1">
+        <h3 className="text-xl font-semibold tracking-[0.16em] uppercase text-[#5d7f3b]">
+          {title}
+        </h3>
+        <p className="text-sm text-[#7a7f54]">{description}</p>
+      </div>
+
+      <div className="overflow-x-auto rounded-lg border border-[#d0c9a4] bg-white/85 shadow-sm">
+        <table className="min-w-full border-collapse text-left text-sm text-[#4f5730]">
+          <thead className="bg-[#f4f1df] text-[11px] uppercase tracking-[0.14em] text-[#6b6f4c]">
+            <tr>
+              <th className="px-4 py-3 border-b border-[#e2d7b5]">Day</th>
+              <th className="px-4 py-3 border-b border-[#e2d7b5]">
+                Condo Cleaning
+              </th>
+              <th className="px-4 py-3 border-b border-[#e2d7b5]">
+                Evening shift
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {dayRows.map((row) => {
+              const condoHasUser = normalizedUser
+                ? row.condoCleaning.some((p) => p.toLowerCase() === normalizedUser)
+                : false;
+              const eveningHasUser = normalizedUser
+                ? row.eveningShift.some((p) => p.toLowerCase() === normalizedUser)
+                : false;
+
+              return (
+                <tr
+                  key={row.day}
+                  className={row.isActiveDay ? "bg-[#f9f6e7]" : ""}
+                >
+                  <td className="px-4 py-3 border-b border-[#eee6c8] font-semibold text-[#3e4c24]">
+                    {row.day}
+                  </td>
+                  <td
+                    className={`px-4 py-3 border-b border-[#eee6c8] ${
+                      condoHasUser ? "ring-2 ring-[#d2e4a0] ring-inset" : ""
+                    }`}
+                  >
+                    {renderNames(row.condoCleaning)}
+                  </td>
+                  <td
+                    className={`px-4 py-3 border-b border-[#eee6c8] ${
+                      eveningHasUser ? "ring-2 ring-[#d2e4a0] ring-inset" : ""
+                    }`}
+                  >
+                    {renderNames(row.eveningShift)}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+
+      <div className="space-y-2">
+        <div className="flex items-center justify-between">
+          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[#5d7f3b]">
+            Evening shift tasks
+          </p>
+        </div>
+        {indexTasks.length === 0 ? (
+          <p className="text-sm text-[#7a7f54] italic">
+            No shared evening shift tasks listed yet.
+          </p>
+        ) : (
+          <div className="grid gap-3 md:grid-cols-2">
+            {indexTasks.map((entry) => {
+              const participants = entry.people;
+              const includesUser = normalizedUser
+                ? participants.some((p) => p.toLowerCase() === normalizedUser)
+                : false;
+              const meta = taskMetaMap[taskBaseName(entry.task)];
+              const status = meta?.status;
+              const typeClass = typeColorClasses(meta?.typeColor);
+              const primaryPerson = includesUser
+                ? currentUserName || participants[0] || "Team"
+                : participants[0] || currentUserName || "Team";
+
+              return (
+                <button
+                  key={`${entry.slot.id}-${entry.task}`}
+                  type="button"
+                  onClick={() =>
+                    onTaskClick?.({
+                      person: primaryPerson,
+                      slot: entry.slot,
+                      task: entry.task,
+                      groupNames: participants,
+                    })
+                  }
+                  className={`w-full rounded-md border px-3 py-2 text-left shadow-sm transition hover:shadow ${typeClass} ${
+                    includesUser ? "ring-2 ring-[#d2e4a0]" : ""
+                  }`}
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div>
+                      <div className="font-semibold text-[#42502d]">
+                        {entry.task}
+                      </div>
+                      <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-[#7a7f54]">
+                        <span className="rounded-full bg-white/80 px-2 py-[2px] text-[10px] font-semibold uppercase tracking-[0.12em] text-[#4f5730]">
+                          {participants.length}{" "}
+                          {participants.length === 1 ? "person" : "people"}
+                        </span>
+                        {includesUser && (
+                          <span className="inline-flex items-center rounded-full bg-[#f1edd8] px-2 py-[1px] text-[10px] font-semibold text-[#4f4b33]">
+                            You&apos;re on this task
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    <StatusBadge
+                      status={status}
+                      color={statusColors[status || ""]}
+                    />
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function WeekendScheduleTable({
+  title,
+  description,
+  slotRows,
+  indexTasks,
+  onTaskClick,
+  taskMetaMap,
+  statusColors,
+  currentUserName,
+}: {
+  title: string;
+  description: string;
+  slotRows: { slot: Slot; people: string[] }[];
+  indexTasks: { task: string; slot: Slot; people: string[] }[];
+  onTaskClick?: (payload: TaskClickPayload) => void;
+  taskMetaMap: Record<string, TaskMeta>;
+  statusColors: Record<string, string>;
+  currentUserName?: string | null;
+}) {
+  const normalizedUser = (currentUserName || "").toLowerCase().trim();
+
+  const renderNames = (names: string[]) => {
+    if (!names.length) {
+      return <span className="text-[11px] italic text-[#7a7f54]">—</span>;
+    }
+
+    const ordered = normalizedUser
+      ? [
+          ...names.filter((name) => name.toLowerCase() === normalizedUser),
+          ...names.filter((name) => name.toLowerCase() !== normalizedUser),
+        ]
+      : names;
+
+    return (
+      <div className="flex flex-wrap gap-1.5">
+        {ordered.map((name) => {
+          const isMe =
+            normalizedUser && name.toLowerCase() === normalizedUser;
+          return (
+            <span
+              key={name}
+              className={`rounded-full px-2 py-[2px] text-[11px] font-semibold ${
+                isMe
+                  ? "bg-[#a0b764] text-white"
+                  : "bg-[#eef2d9] text-[#3f4b29]"
+              }`}
+            >
+              {isMe ? `${name} (you)` : name}
+            </span>
+          );
+        })}
+      </div>
+    );
+  };
+
+  return (
+    <section className="space-y-3">
+      <div className="flex flex-col gap-1">
+        <h3 className="text-xl font-semibold tracking-[0.16em] uppercase text-[#5d7f3b]">
+          {title}
+        </h3>
+        <p className="text-sm text-[#7a7f54]">{description}</p>
+      </div>
+
+      <div className="overflow-x-auto rounded-lg border border-[#d0c9a4] bg-white/85 shadow-sm">
+        <table className="min-w-full border-collapse text-left text-sm text-[#4f5730]">
+          <thead className="bg-[#f4f1df] text-[11px] uppercase tracking-[0.14em] text-[#6b6f4c]">
+            <tr>
+              {slotRows.map((row) => (
+                <th
+                  key={row.slot.id}
+                  className="px-4 py-3 border-b border-[#e2d7b5]"
+                >
+                  <div className="flex flex-col">
+                    <span>{row.slot.label}</span>
+                    {row.slot.timeRange && (
+                      <span className="text-[10px] text-[#8a8256] normal-case">
+                        {row.slot.timeRange}
+                      </span>
+                    )}
+                  </div>
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              {slotRows.map((row) => {
+                const hasUser = normalizedUser
+                  ? row.people.some((p) => p.toLowerCase() === normalizedUser)
+                  : false;
+                return (
+                  <td
+                    key={row.slot.id}
+                    className={`px-4 py-4 border-b border-[#eee6c8] align-top ${
+                      hasUser ? "ring-2 ring-[#d2e4a0] ring-inset" : ""
+                    }`}
+                  >
+                    {renderNames(row.people)}
+                  </td>
+                );
+              })}
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div className="space-y-2">
+        <div className="flex items-center justify-between">
+          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[#5d7f3b]">
+            Weekend shift tasks
+          </p>
+        </div>
+        {indexTasks.length === 0 ? (
+          <p className="text-sm text-[#7a7f54] italic">
+            No shared weekend shift tasks listed yet.
+          </p>
+        ) : (
+          <div className="grid gap-3 md:grid-cols-2">
+            {indexTasks.map((entry) => {
+              const participants = entry.people;
+              const includesUser = normalizedUser
+                ? participants.some((p) => p.toLowerCase() === normalizedUser)
+                : false;
+              const meta = taskMetaMap[taskBaseName(entry.task)];
+              const status = meta?.status;
+              const typeClass = typeColorClasses(meta?.typeColor);
+              const primaryPerson = includesUser
+                ? currentUserName || participants[0] || "Team"
+                : participants[0] || currentUserName || "Team";
+
+              return (
+                <button
+                  key={`${entry.slot.id}-${entry.task}`}
+                  type="button"
+                  onClick={() =>
+                    onTaskClick?.({
+                      person: primaryPerson,
+                      slot: entry.slot,
+                      task: entry.task,
+                      groupNames: participants,
+                    })
+                  }
+                  className={`w-full rounded-md border px-3 py-2 text-left shadow-sm transition hover:shadow ${typeClass} ${
+                    includesUser ? "ring-2 ring-[#d2e4a0]" : ""
+                  }`}
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div>
+                      <div className="font-semibold text-[#42502d]">
+                        {entry.task}
+                      </div>
+                      <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-[#7a7f54]">
+                        <span className="rounded-full bg-white/80 px-2 py-[2px] text-[10px] font-semibold uppercase tracking-[0.12em] text-[#4f5730]">
+                          {participants.length}{" "}
+                          {participants.length === 1 ? "person" : "people"}
+                        </span>
+                        {includesUser && (
+                          <span className="inline-flex items-center rounded-full bg-[#f1edd8] px-2 py-[1px] text-[10px] font-semibold text-[#4f4b33]">
+                            You&apos;re on this task
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    <StatusBadge
+                      status={status}
+                      color={statusColors[status || ""]}
+                    />
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}
+
 function StatusBadge({ status, color }: { status?: string; color?: string }) {
   if (!status) return null;
 
@@ -2943,6 +3656,7 @@ function ScheduleGrid({
             return (
               <th
                 key={slot.id}
+                data-slot-id={slot.id}
                 className={`border border-[#d1d4aa] px-3 py-2 text-left text-[11px] font-semibold uppercase tracking-[0.12em]
                   ${
                     isCurrent
