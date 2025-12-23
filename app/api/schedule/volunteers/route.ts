@@ -77,9 +77,9 @@ export async function POST(req: Request) {
         role: getPlainText(props["User Type"]),
       };
     })
-    .filter((entry) => entry.name)
-    .filter((entry) => entry.role.toLowerCase() === "volunteer")
-    .map((entry) => entry.name);
+    .filter((entry: { name: string; role: string }) => entry.name)
+    .filter((entry: { name: string; role: string }) => entry.role.toLowerCase() === "volunteer")
+    .map((entry: { name: string; role: string }) => entry.name);
 
   const volunteerSet = new Set(volunteerNames.map((n) => n.toLowerCase()));
 
