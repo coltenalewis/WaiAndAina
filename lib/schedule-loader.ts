@@ -167,10 +167,11 @@ export async function resolveScheduleDatabase(
 
   try {
     const meta = await retrieveDatabase(SCHEDULE_DB_ID);
-    if (dateLabel) {
-      throw new Error("Schedule root is a database; date selection is unavailable.");
-    }
-    return { databaseId: SCHEDULE_DB_ID, databaseMeta: meta };
+    return {
+      databaseId: SCHEDULE_DB_ID,
+      databaseMeta: meta,
+      scheduleDate: dateLabel ? formatScheduleDateLabel(dateLabel) : undefined,
+    };
   } catch (err) {
     console.warn("Schedule ID is not a database, attempting to read page children");
   }

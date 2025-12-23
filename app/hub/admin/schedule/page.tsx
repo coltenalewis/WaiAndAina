@@ -157,6 +157,7 @@ export default function AdminScheduleEditorPage() {
   const [availableSchedules, setAvailableSchedules] = useState<
     { dateLabel: string; liveId?: string; stagingId?: string }[]
   >([]);
+  const [scheduleMode, setScheduleMode] = useState<"database" | "page">("page");
   const [selectedDate, setSelectedDate] = useState<string>("");
   const [scheduleLoading, setScheduleLoading] = useState(false);
   const [scheduleNote, setScheduleNote] = useState<string | null>(null);
@@ -224,6 +225,7 @@ export default function AdminScheduleEditorPage() {
         if (scheduleListRes.ok) {
           const json = await scheduleListRes.json();
           setAvailableSchedules(json.schedules || []);
+          setScheduleMode(json.mode === "database" ? "database" : "page");
           if (json.selectedDate) {
             setSelectedDate(json.selectedDate);
           } else if (Array.isArray(json.schedules) && json.schedules.length) {
@@ -243,10 +245,13 @@ export default function AdminScheduleEditorPage() {
     () => availableSchedules.find((entry) => entry.dateLabel === selectedDate),
     [availableSchedules, selectedDate]
   );
-  const scheduleMissing = Boolean(selectedDate && !selectedEntry);
+  const scheduleMissing = Boolean(
+    scheduleMode === "page" && selectedDate && !selectedEntry
+  );
 
   useEffect(() => {
-    if (!authorized || !selectedDate) return;
+    if (!authorized) return;
+    if (scheduleMode === "page" && !selectedDate) return;
     if (scheduleMissing) {
       setScheduleData(null);
       return;
@@ -257,9 +262,11 @@ export default function AdminScheduleEditorPage() {
       setScheduleLoading(true);
       setScheduleNote(null);
       try {
-        const res = await fetch(
-          `/api/schedule?date=${encodeURIComponent(selectedDate)}&staging=1`
-        );
+        const url =
+          scheduleMode === "page"
+            ? `/api/schedule?date=${encodeURIComponent(selectedDate)}&staging=1`
+            : "/api/schedule";
+        const res = await fetch(url);
         if (res.ok) {
           const json = await res.json();
           if (!cancelled) {
@@ -280,12 +287,12 @@ export default function AdminScheduleEditorPage() {
     return () => {
       cancelled = true;
     };
-  }, [authorized, scheduleMissing, selectedDate]);
+  }, [authorized, scheduleMissing, scheduleMode, selectedDate]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
     // no-op placeholder to avoid hydration mismatch if future window sizing is needed
-  }, [selectedDate]);
+  }, [scheduleMode, selectedDate]);
 
   const filteredTaskBank = useMemo(() => {
     return taskBank.filter((task) => {
@@ -317,7 +324,7 @@ export default function AdminScheduleEditorPage() {
   );
 
   const persistCell = useCallback(async (person: string, slotId: string, content: CellContent) => {
-    if (!selectedDate) return;
+    if (scheduleMode === "page" && !selectedDate) return;
     const key = `${person}-${slotId}`;
     setPendingCells((prev) => new Set(prev).add(key));
     try {
@@ -328,8 +335,8 @@ export default function AdminScheduleEditorPage() {
           person,
           slotId,
           replaceValue: serializeCell(content),
-          dateLabel: selectedDate,
-          staging: true,
+          dateLabel: scheduleMode === "page" ? selectedDate : undefined,
+          staging: scheduleMode === "page",
         }),
       });
       if (!res.ok) {
@@ -580,10 +587,13 @@ export default function AdminScheduleEditorPage() {
 
   const refreshSchedule = async () => {
     try {
-      if (!selectedDate) return;
-      const res = await fetch(
-        `/api/schedule?date=${encodeURIComponent(selectedDate)}&staging=1`
-      );
+      if (scheduleMode === "page" && !selectedDate) return;
+      const res =
+        scheduleMode === "page"
+          ? await fetch(
+              `/api/schedule?date=${encodeURIComponent(selectedDate)}&staging=1`
+            )
+          : await fetch("/api/schedule");
       if (res.ok) {
         const json = await res.json();
         setScheduleData(json);
@@ -596,6 +606,7 @@ export default function AdminScheduleEditorPage() {
   };
 
   const ensureScheduleForDate = async (dateLabel: string) => {
+    if (scheduleMode !== "page") return;
     if (!dateLabel) return;
     setScheduleNote(null);
     try {
@@ -629,6 +640,7 @@ export default function AdminScheduleEditorPage() {
   }, [scheduleMissing, selectedDate]);
 
   const publishSchedule = async () => {
+    if (scheduleMode !== "page") return;
     if (!selectedDate) return;
     setScheduleNote(null);
     try {
@@ -649,6 +661,7 @@ export default function AdminScheduleEditorPage() {
   };
 
   const syncVolunteers = async () => {
+    if (scheduleMode !== "page") return;
     if (!selectedDate) return;
     setVolunteerSyncMessage(null);
     try {
@@ -672,15 +685,16 @@ export default function AdminScheduleEditorPage() {
   };
 
   const addCustomPersonRow = async () => {
-    if (!newPersonName.trim() || !selectedDate) return;
+    if (!newPersonName.trim()) return;
+    if (scheduleMode === "page" && !selectedDate) return;
     try {
       const res = await fetch("/api/schedule/people", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           name: newPersonName.trim(),
-          dateLabel: selectedDate,
-          staging: true,
+          dateLabel: scheduleMode === "page" ? selectedDate : undefined,
+          staging: scheduleMode === "page",
         }),
       });
       const json = await res.json();
@@ -780,6 +794,7 @@ export default function AdminScheduleEditorPage() {
                   const next = formatDateInput(e.target.value);
                   setSelectedDate(next);
                 }}
+                disabled={scheduleMode !== "page"}
                 className="rounded-md border border-[#d0c9a4] bg-white px-2 py-1 text-xs text-[#314123] focus:border-[#8fae4c] focus:outline-none"
               />
             </label>
@@ -790,6 +805,7 @@ export default function AdminScheduleEditorPage() {
               <select
                 value={selectedDate}
                 onChange={(e) => setSelectedDate(e.target.value)}
+                disabled={scheduleMode !== "page"}
                 className="rounded-md border border-[#d0c9a4] bg-white px-2 py-1 text-xs text-[#314123] focus:border-[#8fae4c] focus:outline-none"
               >
                 <option value="">Select a date</option>
@@ -803,7 +819,7 @@ export default function AdminScheduleEditorPage() {
             <button
               type="button"
               onClick={() => ensureScheduleForDate(selectedDate)}
-              disabled={!selectedDate}
+              disabled={!selectedDate || scheduleMode !== "page"}
               className="rounded-md border border-[#d0c9a4] bg-white px-3 py-1 font-semibold uppercase tracking-[0.08em] text-[#314123] shadow-sm transition hover:bg-[#f1edd8] disabled:opacity-60"
             >
               Create schedule
@@ -811,7 +827,7 @@ export default function AdminScheduleEditorPage() {
             <button
               type="button"
               onClick={publishSchedule}
-              disabled={!selectedDate || scheduleMissing}
+              disabled={!selectedDate || scheduleMissing || scheduleMode !== "page"}
               className="rounded-md bg-[#8fae4c] px-3 py-1 font-semibold uppercase tracking-[0.08em] text-[#f9f9ec] shadow-sm transition hover:bg-[#7e9c44] disabled:opacity-60"
             >
               Publish
@@ -819,7 +835,7 @@ export default function AdminScheduleEditorPage() {
             <button
               type="button"
               onClick={syncVolunteers}
-              disabled={!selectedDate}
+              disabled={!selectedDate || scheduleMode !== "page"}
               className="rounded-md border border-[#d0c9a4] bg-[#f4f1df] px-3 py-1 font-semibold uppercase tracking-[0.08em] text-[#4b5133] shadow-sm transition hover:bg-[#ede6c6] disabled:opacity-60"
             >
               Add all volunteers
@@ -834,6 +850,11 @@ export default function AdminScheduleEditorPage() {
             <p className="mt-1 text-xs text-[#6a6c4d]">
               Live: {selectedEntry.liveId ? "ready" : "missing"} • Staging:{" "}
               {selectedEntry.stagingId ? "ready" : "missing"}
+            </p>
+          )}
+          {scheduleMode === "database" && (
+            <p className="mt-1 text-xs text-[#6a6c4d]">
+              Editing the default schedule database (no per-date staging).
             </p>
           )}
           {scheduleNote && (
@@ -882,7 +903,10 @@ export default function AdminScheduleEditorPage() {
             <button
               type="button"
               onClick={addCustomPersonRow}
-              disabled={!newPersonName.trim() || !selectedDate}
+              disabled={
+                !newPersonName.trim() ||
+                (scheduleMode === "page" && !selectedDate)
+              }
               className="rounded-md border border-[#d0c9a4] bg-white px-3 py-1 font-semibold uppercase tracking-[0.08em] text-[#314123] shadow-sm transition hover:bg-[#f1edd8] disabled:opacity-60"
             >
               Add person row

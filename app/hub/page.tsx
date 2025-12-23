@@ -828,6 +828,17 @@ export default function HubSchedulePage() {
     people: string[];
   };
 
+  type WeekendSlotSummary = {
+    slot: Slot;
+    people: string[];
+  };
+
+  type WeekendIndexTask = {
+    task: string;
+    slot: Slot;
+    people: string[];
+  };
+
   const shiftTaskAssignments = useCallback(
     (targetSlots: Slot[]): ShiftTaskCell[] => {
       if (!data) return [];
@@ -882,10 +893,67 @@ export default function HubSchedulePage() {
     [data, knownUsers]
   );
 
-  const weekendShiftTasks = useMemo(
-    () => shiftTaskAssignments(weekendSlots),
-    [shiftTaskAssignments, weekendSlots]
-  );
+
+  const weekendScheduleSummary = useMemo(() => {
+    if (!data || weekendSlots.length === 0) {
+      return { slotRows: [] as WeekendSlotSummary[], indexTasks: [] as WeekendIndexTask[] };
+    }
+
+    const sortNames = (names: string[]) => {
+      const unique = Array.from(new Set(names.filter(Boolean)));
+      if (!currentUserName) return unique;
+      const normalizedUser = currentUserName.toLowerCase();
+      const meIndex = unique.findIndex(
+        (name) => name.toLowerCase() === normalizedUser
+      );
+      if (meIndex === -1) return unique;
+      return [unique[meIndex], ...unique.filter((_, idx) => idx !== meIndex)];
+    };
+
+    const slotRows = weekendSlots.map((slot) => {
+      const slotIdx = data.slots.findIndex((s) => s.id === slot.id);
+      if (slotIdx === -1) {
+        return { slot, people: [] };
+      }
+
+      const people = data.people.filter((person, rowIdx) => {
+        const cell = (data.cells[rowIdx]?.[slotIdx] ?? "").trim();
+        return splitCellTasks(cell).length > 0;
+      });
+
+      return { slot, people: sortNames(people) };
+    });
+
+    const indexMap = new Map<string, { task: string; slot: Slot; people: Set<string> }>();
+    weekendSlots.forEach((slot) => {
+      const slotIdx = data.slots.findIndex((s) => s.id === slot.id);
+      if (slotIdx === -1) return;
+      data.people.forEach((person, rowIdx) => {
+        const cell = (data.cells[rowIdx]?.[slotIdx] ?? "").trim();
+        if (!cell) return;
+        splitCellTasks(cell).forEach((task) => {
+          const base = taskBaseName(task);
+          if (!base) return;
+          const key = base.toLowerCase();
+          if (!indexMap.has(key)) {
+            indexMap.set(key, { task: base, slot, people: new Set() });
+          }
+          indexMap.get(key)?.people.add(person);
+        });
+      });
+    });
+
+    const indexTasks = Array.from(indexMap.values())
+      .filter((entry) => entry.people.size > 1)
+      .map((entry) => ({
+        task: entry.task,
+        slot: entry.slot,
+        people: Array.from(entry.people),
+      }))
+      .sort((a, b) => a.task.localeCompare(b.task));
+
+    return { slotRows, indexTasks };
+  }, [currentUserName, data, weekendSlots]);
 
   const eveningScheduleSummary = useMemo(() => {
     const baseRows: EveningDayRow[] = (weekDays.length
@@ -1036,9 +1104,9 @@ export default function HubSchedulePage() {
     eveningScheduleSummary.dayRows.some(
       (row) => row.condoCleaning.length > 0 || row.eveningShift.length > 0
     ) || eveningScheduleSummary.indexTasks.length > 0;
-  const weekendHasContent = weekendShiftTasks.some(
-    (cell) => cell.tasks.length > 0
-  );
+  const weekendHasContent =
+    weekendScheduleSummary.slotRows.some((row) => row.people.length > 0) ||
+    weekendScheduleSummary.indexTasks.length > 0;
 
   const showEveningSection =
     !isExternalVolunteer && (isVolunteer || isAdmin || eveningHasContent);
@@ -1666,10 +1734,11 @@ async function handleTaskClick(taskPayload: TaskClickPayload) {
           !error &&
           data &&
           showWeekendSection && (
-            <ShiftTaskTable
+            <WeekendScheduleTable
               title="Weekend Schedule"
-              description="Weekend shift coverage. Tasks can be completed within the listed time ranges."
-              slots={weekendShiftTasks}
+              description="Weekend shift coverage with assignments by shift."
+              slotRows={weekendScheduleSummary.slotRows}
+              indexTasks={weekendScheduleSummary.indexTasks}
               onTaskClick={handleTaskClick}
               taskMetaMap={taskMetaMap}
               statusColors={statusColorLookup}
@@ -2983,6 +3052,185 @@ function EveningScheduleTable({
         {indexTasks.length === 0 ? (
           <p className="text-sm text-[#7a7f54] italic">
             No shared evening shift tasks listed yet.
+          </p>
+        ) : (
+          <div className="grid gap-3 md:grid-cols-2">
+            {indexTasks.map((entry) => {
+              const participants = entry.people;
+              const includesUser = normalizedUser
+                ? participants.some((p) => p.toLowerCase() === normalizedUser)
+                : false;
+              const meta = taskMetaMap[taskBaseName(entry.task)];
+              const status = meta?.status;
+              const typeClass = typeColorClasses(meta?.typeColor);
+              const primaryPerson = includesUser
+                ? currentUserName || participants[0] || "Team"
+                : participants[0] || currentUserName || "Team";
+
+              return (
+                <button
+                  key={`${entry.slot.id}-${entry.task}`}
+                  type="button"
+                  onClick={() =>
+                    onTaskClick?.({
+                      person: primaryPerson,
+                      slot: entry.slot,
+                      task: entry.task,
+                      groupNames: participants,
+                    })
+                  }
+                  className={`w-full rounded-md border px-3 py-2 text-left shadow-sm transition hover:shadow ${typeClass} ${
+                    includesUser ? "ring-2 ring-[#d2e4a0]" : ""
+                  }`}
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div>
+                      <div className="font-semibold text-[#42502d]">
+                        {entry.task}
+                      </div>
+                      <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-[#7a7f54]">
+                        <span className="rounded-full bg-white/80 px-2 py-[2px] text-[10px] font-semibold uppercase tracking-[0.12em] text-[#4f5730]">
+                          {participants.length}{" "}
+                          {participants.length === 1 ? "person" : "people"}
+                        </span>
+                        {includesUser && (
+                          <span className="inline-flex items-center rounded-full bg-[#f1edd8] px-2 py-[1px] text-[10px] font-semibold text-[#4f4b33]">
+                            You&apos;re on this task
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    <StatusBadge
+                      status={status}
+                      color={statusColors[status || ""]}
+                    />
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function WeekendScheduleTable({
+  title,
+  description,
+  slotRows,
+  indexTasks,
+  onTaskClick,
+  taskMetaMap,
+  statusColors,
+  currentUserName,
+}: {
+  title: string;
+  description: string;
+  slotRows: { slot: Slot; people: string[] }[];
+  indexTasks: { task: string; slot: Slot; people: string[] }[];
+  onTaskClick?: (payload: TaskClickPayload) => void;
+  taskMetaMap: Record<string, TaskMeta>;
+  statusColors: Record<string, string>;
+  currentUserName?: string | null;
+}) {
+  const normalizedUser = (currentUserName || "").toLowerCase().trim();
+
+  const renderNames = (names: string[]) => {
+    if (!names.length) {
+      return <span className="text-[11px] italic text-[#7a7f54]">—</span>;
+    }
+
+    const ordered = normalizedUser
+      ? [
+          ...names.filter((name) => name.toLowerCase() === normalizedUser),
+          ...names.filter((name) => name.toLowerCase() !== normalizedUser),
+        ]
+      : names;
+
+    return (
+      <div className="flex flex-wrap gap-1.5">
+        {ordered.map((name) => {
+          const isMe =
+            normalizedUser && name.toLowerCase() === normalizedUser;
+          return (
+            <span
+              key={name}
+              className={`rounded-full px-2 py-[2px] text-[11px] font-semibold ${
+                isMe
+                  ? "bg-[#a0b764] text-white"
+                  : "bg-[#eef2d9] text-[#3f4b29]"
+              }`}
+            >
+              {isMe ? `${name} (you)` : name}
+            </span>
+          );
+        })}
+      </div>
+    );
+  };
+
+  return (
+    <section className="space-y-3">
+      <div className="flex flex-col gap-1">
+        <h3 className="text-xl font-semibold tracking-[0.16em] uppercase text-[#5d7f3b]">
+          {title}
+        </h3>
+        <p className="text-sm text-[#7a7f54]">{description}</p>
+      </div>
+
+      <div className="overflow-x-auto rounded-lg border border-[#d0c9a4] bg-white/85 shadow-sm">
+        <table className="min-w-full border-collapse text-left text-sm text-[#4f5730]">
+          <thead className="bg-[#f4f1df] text-[11px] uppercase tracking-[0.14em] text-[#6b6f4c]">
+            <tr>
+              {slotRows.map((row) => (
+                <th
+                  key={row.slot.id}
+                  className="px-4 py-3 border-b border-[#e2d7b5]"
+                >
+                  <div className="flex flex-col">
+                    <span>{row.slot.label}</span>
+                    {row.slot.timeRange && (
+                      <span className="text-[10px] text-[#8a8256] normal-case">
+                        {row.slot.timeRange}
+                      </span>
+                    )}
+                  </div>
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              {slotRows.map((row) => {
+                const hasUser = normalizedUser
+                  ? row.people.some((p) => p.toLowerCase() === normalizedUser)
+                  : false;
+                return (
+                  <td
+                    key={row.slot.id}
+                    className={`px-4 py-4 border-b border-[#eee6c8] align-top ${
+                      hasUser ? "ring-2 ring-[#d2e4a0] ring-inset" : ""
+                    }`}
+                  >
+                    {renderNames(row.people)}
+                  </td>
+                );
+              })}
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div className="space-y-2">
+        <div className="flex items-center justify-between">
+          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[#5d7f3b]">
+            Weekend shift tasks
+          </p>
+        </div>
+        {indexTasks.length === 0 ? (
+          <p className="text-sm text-[#7a7f54] italic">
+            No shared weekend shift tasks listed yet.
           </p>
         ) : (
           <div className="grid gap-3 md:grid-cols-2">
