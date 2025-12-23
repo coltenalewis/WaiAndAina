@@ -295,16 +295,16 @@ export default function AdminScheduleEditorPage() {
     });
   }, [taskBank, taskSearch, taskStatusFilter, taskTypeFilter]);
 
-  const scheduleTitle = useMemo(() => {
-    if (!selectedDate) return "Schedule editor";
-    return `Editing Staging - ${selectedDate}`;
-  }, [selectedDate]);
-
   const selectedEntry = useMemo(
     () => availableSchedules.find((entry) => entry.dateLabel === selectedDate),
     [availableSchedules, selectedDate]
   );
   const scheduleMissing = Boolean(selectedDate && !selectedEntry);
+
+  const scheduleTitle = useMemo(() => {
+    if (!selectedDate) return "Schedule editor";
+    return `Editing Staging - ${selectedDate}`;
+  }, [selectedDate]);
 
   const findCoord = useCallback(
     (person: string | undefined, slotId: string | undefined, data: ScheduleResponse | null) => {
