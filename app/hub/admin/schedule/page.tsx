@@ -239,6 +239,12 @@ export default function AdminScheduleEditorPage() {
     loadStatic();
   }, [authorized]);
 
+  const selectedEntry = useMemo(
+    () => availableSchedules.find((entry) => entry.dateLabel === selectedDate),
+    [availableSchedules, selectedDate]
+  );
+  const scheduleMissing = Boolean(selectedDate && !selectedEntry);
+
   useEffect(() => {
     if (!authorized || !selectedDate) return;
     if (scheduleMissing) {
@@ -276,7 +282,6 @@ export default function AdminScheduleEditorPage() {
     };
   }, [authorized, scheduleMissing, selectedDate]);
 
-
   useEffect(() => {
     if (typeof window === "undefined") return;
     // no-op placeholder to avoid hydration mismatch if future window sizing is needed
@@ -294,12 +299,6 @@ export default function AdminScheduleEditorPage() {
       return matchesSearch && matchesType && matchesStatus;
     });
   }, [taskBank, taskSearch, taskStatusFilter, taskTypeFilter]);
-
-  const selectedEntry = useMemo(
-    () => availableSchedules.find((entry) => entry.dateLabel === selectedDate),
-    [availableSchedules, selectedDate]
-  );
-  const scheduleMissing = Boolean(selectedDate && !selectedEntry);
 
   const scheduleTitle = useMemo(() => {
     if (!selectedDate) return "Schedule editor";
