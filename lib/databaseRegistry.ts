@@ -18,7 +18,14 @@ export const DATABASE_REGISTRY: DatabaseRegistryItem[] = [
     name: "Schedule",
     envVar: "NOTION_SCHEDULE_DATABASE_ID",
     purpose: "Daily shift grid for volunteers and admins, including cell tasks and notes.",
-    endpoints: ["/api/schedule"],
+    endpoints: [
+      "/api/schedule",
+      "/api/schedule/list",
+      "/api/schedule/create",
+      "/api/schedule/publish",
+      "/api/schedule/volunteers",
+      "/api/schedule/people",
+    ],
     surfaces: ["/hub", "/hub/admin/schedule"],
   },
   {
@@ -31,6 +38,7 @@ export const DATABASE_REGISTRY: DatabaseRegistryItem[] = [
       "/api/tasks/reset-recurring",
       "/api/reports",
       "/api/create-report",
+      "/api/reset-recurring",
     ],
     surfaces: ["/hub/admin/schedule"],
   },

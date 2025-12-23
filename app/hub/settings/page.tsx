@@ -23,6 +23,8 @@ export default function HubSettingsPage() {
   const [formSuccess, setFormSuccess] = useState<string | null>(null);
   const [capabilityError, setCapabilityError] = useState<string | null>(null);
   const [capabilityLoading, setCapabilityLoading] = useState(false);
+  const [cacheStatus, setCacheStatus] = useState<string | null>(null);
+  const [cacheBusy, setCacheBusy] = useState(false);
   const lastFetchedName = useRef<string | null>(null);
 
   // Load current user from session
@@ -127,6 +129,35 @@ export default function HubSettingsPage() {
       setFormError("Something went wrong. Please try again.");
     } finally {
       setIsSubmitting(false);
+    }
+  }
+
+  async function handleClearCache() {
+    setCacheStatus(null);
+    setCacheBusy(true);
+
+    try {
+      if (typeof window === "undefined") return;
+
+      if ("serviceWorker" in navigator) {
+        const registrations = await navigator.serviceWorker.getRegistrations();
+        await Promise.all(
+          registrations.map((registration) => registration.unregister())
+        );
+      }
+
+      if ("caches" in window) {
+        const keys = await caches.keys();
+        await Promise.all(keys.map((key) => caches.delete(key)));
+      }
+
+      setCacheStatus("Cache cleared. Reloading…");
+      window.location.reload();
+    } catch (err) {
+      console.error("Failed to clear cached data:", err);
+      setCacheStatus("Unable to clear cached data right now.");
+    } finally {
+      setCacheBusy(false);
     }
   }
 
@@ -307,6 +338,32 @@ export default function HubSettingsPage() {
                 Selected: {selectedCapabilities.join(", ")}
               </p>
             )}
+          </div>
+
+          <div className="space-y-2 rounded-lg border border-[#d0c9a4] bg-white/80 px-4 py-3">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="text-[12px] font-semibold uppercase tracking-[0.14em] text-[#6b6f4c]">
+                  Cached data
+                </p>
+                <p className="text-[12px] text-[#6f754f]">
+                  If the hub looks out of date, clear cached data to force a fresh reload.
+                </p>
+              </div>
+            </div>
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <button
+                type="button"
+                onClick={handleClearCache}
+                disabled={cacheBusy}
+                className="rounded-md border border-[#d0c9a4] bg-[#f1edd8] px-4 py-2 text-xs font-semibold uppercase tracking-[0.14em] text-[#4f5730] shadow-sm hover:bg-[#e6dfc2] disabled:opacity-60"
+              >
+                {cacheBusy ? "Clearing…" : "Clear cached data"}
+              </button>
+              {cacheStatus && (
+                <span className="text-[11px] text-[#6f754f]">{cacheStatus}</span>
+              )}
+            </div>
           </div>
 
           {/* Messages */}

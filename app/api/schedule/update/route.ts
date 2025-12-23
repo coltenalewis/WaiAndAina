@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { queryDatabase, retrieveDatabase, updatePage } from "@/lib/notion";
+import { queryDatabase, retrieveDatabase, updateDatabase, updatePage } from "@/lib/notion";
 import { resolveScheduleDatabase } from "@/lib/schedule-loader";
 
 function getPlainText(prop: any): string {
@@ -43,7 +43,16 @@ function getTitlePropertyKey(meta: any): string {
 export async function POST(req: Request) {
   try {
     const body = await req.json();
-    const { person, slotId, addTask, removeTask, replaceValue, reportValue } = body || {};
+    const {
+      person,
+      slotId,
+      addTask,
+      removeTask,
+      replaceValue,
+      reportValue,
+      dateLabel,
+      staging,
+    } = body || {};
 
     if (!person || !slotId) {
       return NextResponse.json(
@@ -52,7 +61,10 @@ export async function POST(req: Request) {
       );
     }
 
-    const context = await resolveScheduleDatabase();
+    const context = await resolveScheduleDatabase({
+      dateLabel,
+      staging: Boolean(staging),
+    });
     const databaseId = context.databaseId;
     const meta = context.databaseMeta || (await retrieveDatabase(databaseId));
     const titleKey = getTitlePropertyKey(meta);
@@ -82,8 +94,13 @@ export async function POST(req: Request) {
     }
 
     const currentValue = getPlainText(page.properties?.[slotId]);
-    let tasks =
-      replaceValue !== undefined ? splitTasks(replaceValue) : splitTasks(currentValue);
+    const baseValue =
+      replaceValue !== undefined ? replaceValue : currentValue;
+    const normalizedValue =
+      slotMeta?.type === "multi_select"
+        ? baseValue.split("\n")[0] || ""
+        : baseValue;
+    let tasks = splitTasks(normalizedValue);
 
     if (removeTask) {
       tasks = tasks.filter(
@@ -99,6 +116,40 @@ export async function POST(req: Request) {
     }
 
     const nextValue = joinTasks(tasks);
+
+    if (slotMeta?.type === "multi_select") {
+      const existingOptions = slotMeta.multi_select?.options || [];
+      const existingNames = new Set(
+        existingOptions.map((opt: any) => (opt?.name || "").toLowerCase())
+      );
+      const trimmedTasks = Array.from(
+        new Set(tasks.map((task) => task.trim()).filter(Boolean))
+      );
+      const missing = trimmedTasks.filter(
+        (task) => !existingNames.has(task.toLowerCase())
+      );
+
+      if (missing.length) {
+        const nextOptions = [
+          ...existingOptions,
+          ...missing.map((name: string) => ({ name, color: "default" })),
+        ];
+        await updateDatabase(databaseId, {
+          [slotId]: {
+            multi_select: {
+              options: nextOptions,
+            },
+          },
+        });
+      }
+
+      await updatePage(page.id, {
+        [slotId]: {
+          multi_select: trimmedTasks.map((task) => ({ name: task })),
+        },
+      });
+      return NextResponse.json({ success: true, value: trimmedTasks });
+    }
 
     await updatePage(page.id, {
       [slotId]: {
