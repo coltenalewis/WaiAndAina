@@ -25,7 +25,14 @@ export const DATABASE_REGISTRY: DatabaseRegistryItem[] = [
     name: "Tasks",
     envVar: "NOTION_TASKS_DATABASE_ID",
     purpose: "Task catalog with descriptions, categories, statuses, and recurring resets.",
-    endpoints: ["/api/task", "/api/task-types", "/api/tasks/reset-recurring", "/api/reports"],
+    endpoints: [
+      "/api/task",
+      "/api/task-types",
+      "/api/tasks/reset-recurring",
+      "/api/reports",
+      "/api/create-report",
+      "/api/reset-recurring",
+    ],
     surfaces: ["/hub/admin/schedule"],
   },
   {
@@ -39,7 +46,7 @@ export const DATABASE_REGISTRY: DatabaseRegistryItem[] = [
     name: "Reports",
     envVar: "NOTION_REPORTS_DATABASE_ID",
     purpose: "Auto-generated daily reports composed from schedule and task data.",
-    endpoints: ["/api/reports"],
+    endpoints: ["/api/reports", "/api/create-report"],
     surfaces: ["/hub/admin/schedule"],
   },
   {
