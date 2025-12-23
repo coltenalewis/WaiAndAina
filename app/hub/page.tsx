@@ -172,6 +172,12 @@ export default function HubSchedulePage() {
   const [modalLoading, setModalLoading] = useState(false);
   const [modalIsMeal, setModalIsMeal] = useState(false);
   const taskDetailsRequestRef = useRef(0);
+  const [weekSchedules, setWeekSchedules] = useState<
+    Record<string, ScheduleResponse | null>
+  >({});
+  const [weekDays, setWeekDays] = useState<{ day: string; dateLabel: string }[]>(
+    []
+  );
   const [commentDraft, setCommentDraft] = useState("");
   const [commentSubmitting, setCommentSubmitting] = useState(false);
 
@@ -214,6 +220,12 @@ export default function HubSchedulePage() {
   }, [statusOptions]);
 
   const scheduleDateLabel = data?.scheduleDate;
+  const formatDateLabel = useCallback((date: Date) => {
+    const month = `${date.getMonth() + 1}`.padStart(2, "0");
+    const day = `${date.getDate()}`.padStart(2, "0");
+    const year = date.getFullYear();
+    return `${month}/${day}/${year}`;
+  }, []);
   const scheduleDateObj = useMemo(() => {
     if (!scheduleDateLabel) return null;
     const parsed = new Date(scheduleDateLabel);
@@ -224,6 +236,65 @@ export default function HubSchedulePage() {
     if (!scheduleDateObj) return null;
     return scheduleDateObj.toLocaleDateString("en-US", { weekday: "long" });
   }, [scheduleDateObj]);
+
+  useEffect(() => {
+    if (!scheduleDateObj) return;
+    const dayIndex = scheduleDateObj.getDay();
+    const diffToMonday = (dayIndex + 6) % 7;
+    const monday = new Date(scheduleDateObj);
+    monday.setDate(scheduleDateObj.getDate() - diffToMonday);
+
+    const nextWeekDays = Array.from({ length: 7 }, (_, idx) => {
+      const date = new Date(monday);
+      date.setDate(monday.getDate() + idx);
+      return {
+        day: date.toLocaleDateString("en-US", { weekday: "long" }),
+        dateLabel: formatDateLabel(date),
+      };
+    });
+
+    setWeekDays(nextWeekDays);
+  }, [formatDateLabel, scheduleDateObj]);
+
+  useEffect(() => {
+    if (!weekDays.length || !scheduleDateLabel) return;
+    let cancelled = false;
+
+    const loadWeek = async () => {
+      const next: Record<string, ScheduleResponse | null> = {};
+
+      await Promise.all(
+        weekDays.map(async ({ dateLabel }) => {
+          if (dateLabel === scheduleDateLabel && data) {
+            next[dateLabel] = data;
+            return;
+          }
+          try {
+            const res = await fetch(
+              `/api/schedule?date=${encodeURIComponent(dateLabel)}`,
+              { cache: "no-store" }
+            );
+            const json = await res.json();
+            if (res.ok && json?.people && json?.slots) {
+              const hasContent = json.people.length || json.slots.length;
+              next[dateLabel] = hasContent ? json : null;
+            }
+          } catch (err) {
+            console.error("Failed to load future schedule", err);
+          }
+        })
+      );
+
+      if (!cancelled) {
+        setWeekSchedules(next);
+      }
+    };
+
+    loadWeek();
+    return () => {
+      cancelled = true;
+    };
+  }, [data, scheduleDateLabel, weekDays]);
 
   const isScheduleToday = useMemo(() => {
     if (!scheduleDateObj) return false;
@@ -421,8 +492,10 @@ export default function HubSchedulePage() {
     return <div className="space-y-2">{pieces}</div>;
   }
 
-  const isExternalVolunteer =
-    (currentUserType || "").toLowerCase() === "external volunteer";
+  const normalizedUserType = (currentUserType || "").toLowerCase();
+  const isExternalVolunteer = normalizedUserType === "external volunteer";
+  const isVolunteer = normalizedUserType === "volunteer";
+  const isAdmin = normalizedUserType === "admin";
   const showFullTaskDetail = !modalIsMeal;
 
 
@@ -744,7 +817,6 @@ export default function HubSchedulePage() {
 
   type EveningDayRow = {
     day: string;
-    assigned: string[];
     condoCleaning: string[];
     eveningShift: string[];
     isActiveDay: boolean;
@@ -816,80 +888,129 @@ export default function HubSchedulePage() {
   );
 
   const eveningScheduleSummary = useMemo(() => {
-    const dayLabels = [
-      "Monday",
-      "Tuesday",
-      "Wednesday",
-      "Thursday",
-      "Friday",
-      "Saturday",
-      "Sunday",
-    ];
-
-    const baseRows: EveningDayRow[] = dayLabels.map((day) => ({
+    const baseRows: EveningDayRow[] = (weekDays.length
+      ? weekDays.map((entry) => entry.day)
+      : [
+          "Monday",
+          "Tuesday",
+          "Wednesday",
+          "Thursday",
+          "Friday",
+          "Saturday",
+          "Sunday",
+        ]
+    ).map((day) => ({
       day,
-      assigned: [],
       condoCleaning: [],
       eveningShift: [],
       isActiveDay: scheduleDayName?.toLowerCase() === day.toLowerCase(),
     }));
 
-    if (!data || eveningSlots.length === 0) {
-      return { dayRows: baseRows, indexTasks: [] as EveningIndexTask[] };
-    }
+    const sortNames = (names: string[]) => {
+      const unique = Array.from(new Set(names.filter(Boolean)));
+      if (!currentUserName) return unique;
+      const normalizedUser = currentUserName.toLowerCase();
+      const meIndex = unique.findIndex(
+        (name) => name.toLowerCase() === normalizedUser
+      );
+      if (meIndex === -1) return unique;
+      return [unique[meIndex], ...unique.filter((_, idx) => idx !== meIndex)];
+    };
 
-    const dayRow = scheduleDayName
-      ? baseRows.find(
-          (row) => row.day.toLowerCase() === scheduleDayName.toLowerCase()
+    const collectAssignments = (schedule: ScheduleResponse | null) => {
+      if (!schedule) {
+        return { condo: [] as string[], evening: [] as string[] };
+      }
+
+      const slotIndices = schedule.slots
+        .filter(
+          (slot) =>
+            /evening/i.test(slot.label) &&
+            !/weekend/i.test(slot.label) &&
+            !slot.isMeal
         )
-      : null;
+        .map((slot) => schedule.slots.findIndex((s) => s.id === slot.id))
+        .filter((idx) => idx !== -1);
 
-    const slotIndices = eveningSlots
-      .map((slot) => ({
-        slot,
-        idx: data.slots.findIndex((s) => s.id === slot.id),
-      }))
-      .filter((entry) => entry.idx !== -1);
+      const condo = new Set<string>();
+      const evening = new Set<string>();
 
-    const indexMap = new Map<string, { task: string; slot: Slot; people: Set<string> }>();
+      schedule.people.forEach((person, rowIdx) => {
+        let hasNonCondo = false;
+        let hasCondo = false;
 
-    data.people.forEach((person, rowIdx) => {
-      slotIndices.forEach(({ slot, idx }) => {
-        const cell = (data.cells[rowIdx]?.[idx] ?? "").trim();
-        if (!cell) return;
-
-        const tasks = splitCellTasks(cell);
-        tasks.forEach((task) => {
-          const base = taskBaseName(task);
-          if (!base) return;
-
-          const key = base.toLowerCase();
-          if (!indexMap.has(key)) {
-            indexMap.set(key, { task: base, slot, people: new Set() });
-          }
-          indexMap.get(key)?.people.add(person);
-
-          if (!dayRow) return;
-          dayRow.assigned.push(person);
-          if (/condo cleaning/i.test(base)) {
-            dayRow.condoCleaning.push(person);
-          }
-          if (/evening/i.test(base)) {
-            dayRow.eveningShift.push(person);
-          }
+        slotIndices.forEach((idx) => {
+          const cell = (schedule.cells[rowIdx]?.[idx] ?? "").trim();
+          if (!cell) return;
+          const tasks = splitCellTasks(cell);
+          tasks.forEach((task) => {
+            const base = taskBaseName(task);
+            if (!base) return;
+            if (/condo cleaning/i.test(base)) {
+              hasCondo = true;
+            } else {
+              hasNonCondo = true;
+            }
+          });
         });
+
+        if (hasCondo) condo.add(person);
+        if (hasNonCondo) evening.add(person);
       });
+
+      return {
+        condo: sortNames(Array.from(condo)),
+        evening: sortNames(Array.from(evening)),
+      };
+    };
+
+    const dayRows = baseRows.map((row) => {
+      const dayEntry = weekDays.find(
+        (entry) => entry.day.toLowerCase() === row.day.toLowerCase()
+      );
+      const schedule =
+        dayEntry?.dateLabel && weekSchedules[dayEntry.dateLabel]
+          ? weekSchedules[dayEntry.dateLabel]
+          : row.isActiveDay
+            ? data
+            : null;
+      const { condo, evening } = collectAssignments(schedule || null);
+      return {
+        ...row,
+        condoCleaning: condo,
+        eveningShift: evening,
+      };
     });
 
-    const normalizeList = (items: string[]) =>
-      Array.from(new Set(items.filter(Boolean)));
+    const indexMap = new Map<
+      string,
+      { task: string; slot: Slot; people: Set<string> }
+    >();
 
-    const dayRows = baseRows.map((row) => ({
-      ...row,
-      assigned: normalizeList(row.assigned),
-      condoCleaning: normalizeList(row.condoCleaning),
-      eveningShift: normalizeList(row.eveningShift),
-    }));
+    if (data) {
+      const eveningIndices = eveningSlots
+        .map((slot) => ({
+          slot,
+          idx: data.slots.findIndex((s) => s.id === slot.id),
+        }))
+        .filter((entry) => entry.idx !== -1);
+
+      data.people.forEach((person, rowIdx) => {
+        eveningIndices.forEach(({ slot, idx }) => {
+          const cell = (data.cells[rowIdx]?.[idx] ?? "").trim();
+          if (!cell) return;
+          splitCellTasks(cell).forEach((task) => {
+            const base = taskBaseName(task);
+            if (!base) return;
+            const key = base.toLowerCase();
+            if (!indexMap.has(key)) {
+              indexMap.set(key, { task: base, slot, people: new Set() });
+            }
+            indexMap.get(key)?.people.add(person);
+          });
+        });
+      });
+    }
 
     const indexTasks = Array.from(indexMap.values())
       .filter((entry) => entry.people.size > 1)
@@ -902,21 +1023,27 @@ export default function HubSchedulePage() {
       .sort((a, b) => a.task.localeCompare(b.task));
 
     return { dayRows, indexTasks };
-  }, [data, eveningSlots, scheduleDayName]);
+  }, [
+    currentUserName,
+    data,
+    eveningSlots,
+    scheduleDayName,
+    weekDays,
+    weekSchedules,
+  ]);
 
   const eveningHasContent =
     eveningScheduleSummary.dayRows.some(
-      (row) =>
-        row.assigned.length > 0 ||
-        row.condoCleaning.length > 0 ||
-        row.eveningShift.length > 0
+      (row) => row.condoCleaning.length > 0 || row.eveningShift.length > 0
     ) || eveningScheduleSummary.indexTasks.length > 0;
   const weekendHasContent = weekendShiftTasks.some(
     (cell) => cell.tasks.length > 0
   );
 
-  const showEveningSection = !isExternalVolunteer && eveningHasContent;
-  const showWeekendSection = weekendHasContent;
+  const showEveningSection =
+    !isExternalVolunteer && (isVolunteer || isAdmin || eveningHasContent);
+  const showWeekendSection =
+    isVolunteer || isAdmin || isExternalVolunteer || weekendHasContent;
 
   const myTasks = useMemo(() => {
     if (!data || !currentUserName) return [] as {
@@ -1065,6 +1192,15 @@ export default function HubSchedulePage() {
     if (!node) return;
     const delta = direction === "left" ? -320 : 320;
     node.scrollBy({ left: delta, behavior: "smooth" });
+  };
+
+  const scrollToSlot = (slotId: string) => {
+    const node = scheduleScrollRef.current;
+    if (!node) return;
+    const target = node.querySelector(`[data-slot-id="${slotId}"]`);
+    if (target && target instanceof HTMLElement) {
+      target.scrollIntoView({ behavior: "smooth", inline: "center", block: "nearest" });
+    }
   };
 
   useEffect(() => {
@@ -1401,6 +1537,21 @@ async function handleTaskClick(taskPayload: TaskClickPayload) {
                   Only me
                 </label>
               </div>
+
+              {activeView === "schedule" && weekdayWorkSlots.length > 0 && (
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {weekdayWorkSlots.map((slot) => (
+                    <button
+                      key={slot.id}
+                      type="button"
+                      onClick={() => scrollToSlot(slot.id)}
+                      className="rounded-full border border-[#d0c9a4] bg-white/80 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-[#4a5b2a] shadow-sm transition hover:bg-[#f1edd8]"
+                    >
+                      {slot.label}
+                    </button>
+                  ))}
+                </div>
+              )}
 
               <div className="mt-3 rounded-lg bg-[#a0b764] px-3 py-3">
                 <div className="rounded-md bg-[#f8f4e3]">
@@ -2717,7 +2868,6 @@ function EveningScheduleTable({
   description: string;
   dayRows: {
     day: string;
-    assigned: string[];
     condoCleaning: string[];
     eveningShift: string[];
     isActiveDay: boolean;
@@ -2735,9 +2885,16 @@ function EveningScheduleTable({
       return <span className="text-[11px] italic text-[#7a7f54]">—</span>;
     }
 
+    const ordered = normalizedUser
+      ? [
+          ...names.filter((name) => name.toLowerCase() === normalizedUser),
+          ...names.filter((name) => name.toLowerCase() !== normalizedUser),
+        ]
+      : names;
+
     return (
       <div className="flex flex-wrap gap-1.5">
-        {names.map((name) => {
+        {ordered.map((name) => {
           const isMe =
             normalizedUser && name.toLowerCase() === normalizedUser;
           return (
@@ -2772,9 +2929,6 @@ function EveningScheduleTable({
             <tr>
               <th className="px-4 py-3 border-b border-[#e2d7b5]">Day</th>
               <th className="px-4 py-3 border-b border-[#e2d7b5]">
-                People assigned
-              </th>
-              <th className="px-4 py-3 border-b border-[#e2d7b5]">
                 Condo Cleaning
               </th>
               <th className="px-4 py-3 border-b border-[#e2d7b5]">
@@ -2784,9 +2938,6 @@ function EveningScheduleTable({
           </thead>
           <tbody>
             {dayRows.map((row) => {
-              const assignedHasUser = normalizedUser
-                ? row.assigned.some((p) => p.toLowerCase() === normalizedUser)
-                : false;
               const condoHasUser = normalizedUser
                 ? row.condoCleaning.some((p) => p.toLowerCase() === normalizedUser)
                 : false;
@@ -2801,13 +2952,6 @@ function EveningScheduleTable({
                 >
                   <td className="px-4 py-3 border-b border-[#eee6c8] font-semibold text-[#3e4c24]">
                     {row.day}
-                  </td>
-                  <td
-                    className={`px-4 py-3 border-b border-[#eee6c8] ${
-                      assignedHasUser ? "ring-2 ring-[#d2e4a0] ring-inset" : ""
-                    }`}
-                  >
-                    {renderNames(row.assigned)}
                   </td>
                   <td
                     className={`px-4 py-3 border-b border-[#eee6c8] ${
@@ -3257,6 +3401,7 @@ function ScheduleGrid({
             return (
               <th
                 key={slot.id}
+                data-slot-id={slot.id}
                 className={`border border-[#d1d4aa] px-3 py-2 text-left text-[11px] font-semibold uppercase tracking-[0.12em]
                   ${
                     isCurrent

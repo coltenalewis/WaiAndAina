@@ -43,7 +43,16 @@ function getTitlePropertyKey(meta: any): string {
 export async function POST(req: Request) {
   try {
     const body = await req.json();
-    const { person, slotId, addTask, removeTask, replaceValue, reportValue } = body || {};
+    const {
+      person,
+      slotId,
+      addTask,
+      removeTask,
+      replaceValue,
+      reportValue,
+      dateLabel,
+      staging,
+    } = body || {};
 
     if (!person || !slotId) {
       return NextResponse.json(
@@ -52,7 +61,10 @@ export async function POST(req: Request) {
       );
     }
 
-    const context = await resolveScheduleDatabase();
+    const context = await resolveScheduleDatabase({
+      dateLabel,
+      staging: Boolean(staging),
+    });
     const databaseId = context.databaseId;
     const meta = context.databaseMeta || (await retrieveDatabase(databaseId));
     const titleKey = getTitlePropertyKey(meta);

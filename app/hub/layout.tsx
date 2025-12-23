@@ -128,6 +128,7 @@ export default function HubLayout({ children }: { children: ReactNode }) {
     () => workLinks.map((link) => link.href),
     [workLinks]
   );
+  const showAssistant = false;
 
   function handleLogout() {
     clearSession();
@@ -633,7 +634,7 @@ export default function HubLayout({ children }: { children: ReactNode }) {
       </section>
       </main>
 
-      {canAccessWork && (
+      {canAccessWork && showAssistant && (
         <HubAssistantChat
           variant="floating"
           title="Hub AI assistant"

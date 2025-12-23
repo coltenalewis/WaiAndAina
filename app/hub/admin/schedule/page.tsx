@@ -154,6 +154,14 @@ export default function AdminScheduleEditorPage() {
   const [draggingTask, setDraggingTask] = useState<DragPayload | null>(null);
   const [pendingInsert, setPendingInsert] = useState<{ person: string; slotId: string; index: number } | null>(null);
   const [pendingCells, setPendingCells] = useState<Set<string>>(new Set());
+  const [availableSchedules, setAvailableSchedules] = useState<
+    { dateLabel: string; liveId?: string; stagingId?: string }[]
+  >([]);
+  const [selectedDate, setSelectedDate] = useState<string>("");
+  const [scheduleLoading, setScheduleLoading] = useState(false);
+  const [scheduleNote, setScheduleNote] = useState<string | null>(null);
+  const [newPersonName, setNewPersonName] = useState("");
+  const [volunteerSyncMessage, setVolunteerSyncMessage] = useState<string | null>(null);
   const [taskDetail, setTaskDetail] = useState<TaskDetail | null>(null);
   const [taskEditFields, setTaskEditFields] = useState<TaskPropertyField[]>([]);
   const [taskDetailLoading, setTaskDetailLoading] = useState(false);
@@ -164,6 +172,20 @@ export default function AdminScheduleEditorPage() {
   const [photoMessage, setPhotoMessage] = useState<string | null>(null);
   const photoInputRef = useRef<HTMLInputElement | null>(null);
   const lastInlineAddRef = useRef<Record<string, string>>({});
+  const autoCreateRef = useRef<string | null>(null);
+
+  const formatDateInput = (value: string) => {
+    if (!value) return "";
+    const [year, month, day] = value.split("-");
+    if (!year || !month || !day) return value;
+    return `${month}/${day}/${year}`;
+  };
+
+  const formatLabelToInput = (label: string) => {
+    const [month, day, year] = label.split("/");
+    if (!month || !day || !year) return "";
+    return `${year}-${month.padStart(2, "0")}-${day.padStart(2, "0")}`;
+  };
 
   useEffect(() => {
     const session = loadSession();
@@ -182,18 +204,14 @@ export default function AdminScheduleEditorPage() {
 
   useEffect(() => {
     if (!authorized) return;
-
-    const loadAll = async () => {
+    const loadStatic = async () => {
       try {
-        const [scheduleRes, taskRes, typeRes] = await Promise.all([
-          fetch("/api/schedule"),
+        const [taskRes, typeRes, scheduleListRes] = await Promise.all([
           fetch("/api/task?list=1"),
           fetch("/api/task-types"),
+          fetch("/api/schedule/list?ensureStaging=1"),
         ]);
 
-        if (scheduleRes.ok) {
-          setScheduleData(await scheduleRes.json());
-        }
         if (taskRes.ok) {
           const json = await taskRes.json();
           setTaskBank(json.tasks || []);
@@ -203,19 +221,66 @@ export default function AdminScheduleEditorPage() {
           setTaskTypes(json.types || []);
           setStatusOptions(json.statuses || []);
         }
+        if (scheduleListRes.ok) {
+          const json = await scheduleListRes.json();
+          setAvailableSchedules(json.schedules || []);
+          if (json.selectedDate) {
+            setSelectedDate(json.selectedDate);
+          } else if (Array.isArray(json.schedules) && json.schedules.length) {
+            setSelectedDate(json.schedules[json.schedules.length - 1].dateLabel);
+          }
+        }
       } catch (err) {
         console.error("Failed to load schedule editor data", err);
         setMessage("Could not load schedule tools. Please refresh.");
       }
     };
 
-    loadAll();
+    loadStatic();
   }, [authorized]);
+
+  useEffect(() => {
+    if (!authorized || !selectedDate) return;
+    if (scheduleMissing) {
+      setScheduleData(null);
+      return;
+    }
+    let cancelled = false;
+
+    const loadSchedule = async () => {
+      setScheduleLoading(true);
+      setScheduleNote(null);
+      try {
+        const res = await fetch(
+          `/api/schedule?date=${encodeURIComponent(selectedDate)}&staging=1`
+        );
+        if (res.ok) {
+          const json = await res.json();
+          if (!cancelled) {
+            setScheduleData(json);
+          }
+        }
+      } catch (err) {
+        if (!cancelled) {
+          console.error("Failed to load schedule editor data", err);
+          setMessage("Could not load schedule tools. Please refresh.");
+        }
+      } finally {
+        if (!cancelled) setScheduleLoading(false);
+      }
+    };
+
+    loadSchedule();
+    return () => {
+      cancelled = true;
+    };
+  }, [authorized, scheduleMissing, selectedDate]);
+
 
   useEffect(() => {
     if (typeof window === "undefined") return;
     // no-op placeholder to avoid hydration mismatch if future window sizing is needed
-  }, []);
+  }, [selectedDate]);
 
   const filteredTaskBank = useMemo(() => {
     return taskBank.filter((task) => {
@@ -231,9 +296,15 @@ export default function AdminScheduleEditorPage() {
   }, [taskBank, taskSearch, taskStatusFilter, taskTypeFilter]);
 
   const scheduleTitle = useMemo(() => {
-    if (!scheduleData?.scheduleDate) return "Schedule editor";
-    return `Editing ${scheduleData.scheduleDate}`;
-  }, [scheduleData?.scheduleDate]);
+    if (!selectedDate) return "Schedule editor";
+    return `Editing Staging - ${selectedDate}`;
+  }, [selectedDate]);
+
+  const selectedEntry = useMemo(
+    () => availableSchedules.find((entry) => entry.dateLabel === selectedDate),
+    [availableSchedules, selectedDate]
+  );
+  const scheduleMissing = Boolean(selectedDate && !selectedEntry);
 
   const findCoord = useCallback(
     (person: string | undefined, slotId: string | undefined, data: ScheduleResponse | null) => {
@@ -247,13 +318,20 @@ export default function AdminScheduleEditorPage() {
   );
 
   const persistCell = useCallback(async (person: string, slotId: string, content: CellContent) => {
+    if (!selectedDate) return;
     const key = `${person}-${slotId}`;
     setPendingCells((prev) => new Set(prev).add(key));
     try {
       const res = await fetch("/api/schedule/update", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ person, slotId, replaceValue: serializeCell(content) }),
+        body: JSON.stringify({
+          person,
+          slotId,
+          replaceValue: serializeCell(content),
+          dateLabel: selectedDate,
+          staging: true,
+        }),
       });
       if (!res.ok) {
         const json = await res.json().catch(() => ({}));
@@ -283,7 +361,7 @@ export default function AdminScheduleEditorPage() {
 
         const targetCoord = findCoord(target.person, target.slotId, prev);
         if (!targetCoord) return prev;
-        const targetContent = parseCell(nextCells[targetCoord.row][targetCoord.col]);
+        let targetContent = parseCell(nextCells[targetCoord.row][targetCoord.col]);
 
         let insertionIndex = safeIndex(targetContent.tasks.length, target.targetIndex);
 
@@ -299,6 +377,9 @@ export default function AdminScheduleEditorPage() {
               }
               nextCells[sourceCoord.row][sourceCoord.col] = serializeCell(sourceContent);
               updates.push({ person: payload.fromPerson, slotId: payload.fromSlotId, content: sourceContent });
+              if (sourceCoord.row === targetCoord.row && sourceCoord.col === targetCoord.col) {
+                targetContent = sourceContent;
+              }
             }
           }
         }
@@ -500,7 +581,10 @@ export default function AdminScheduleEditorPage() {
 
   const refreshSchedule = async () => {
     try {
-      const res = await fetch("/api/schedule");
+      if (!selectedDate) return;
+      const res = await fetch(
+        `/api/schedule?date=${encodeURIComponent(selectedDate)}&staging=1`
+      );
       if (res.ok) {
         const json = await res.json();
         setScheduleData(json);
@@ -509,6 +593,106 @@ export default function AdminScheduleEditorPage() {
     } catch (err) {
       console.error("Refresh failed", err);
       setMessage("Unable to refresh schedule. Try again soon.");
+    }
+  };
+
+  const ensureScheduleForDate = async (dateLabel: string) => {
+    if (!dateLabel) return;
+    setScheduleNote(null);
+    try {
+      const res = await fetch("/api/schedule/create", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ dateLabel }),
+      });
+      const json = await res.json();
+      if (!res.ok) {
+        throw new Error(json.error || "Failed to create schedule");
+      }
+      setScheduleNote(`Created schedule for ${dateLabel}.`);
+      const listRes = await fetch("/api/schedule/list?ensureStaging=1");
+      if (listRes.ok) {
+        const listJson = await listRes.json();
+        setAvailableSchedules(listJson.schedules || []);
+      }
+      await refreshSchedule();
+    } catch (err) {
+      console.error("Failed to create schedule", err);
+      setScheduleNote("Unable to create that schedule right now.");
+    }
+  };
+
+  useEffect(() => {
+    if (!selectedDate || !scheduleMissing) return;
+    if (autoCreateRef.current === selectedDate) return;
+    autoCreateRef.current = selectedDate;
+    ensureScheduleForDate(selectedDate);
+  }, [scheduleMissing, selectedDate]);
+
+  const publishSchedule = async () => {
+    if (!selectedDate) return;
+    setScheduleNote(null);
+    try {
+      const res = await fetch("/api/schedule/publish", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ dateLabel: selectedDate }),
+      });
+      const json = await res.json();
+      if (!res.ok) {
+        throw new Error(json.error || "Failed to publish schedule");
+      }
+      setScheduleNote(`Published staging schedule for ${selectedDate}.`);
+    } catch (err) {
+      console.error("Failed to publish schedule", err);
+      setScheduleNote("Unable to publish the schedule right now.");
+    }
+  };
+
+  const syncVolunteers = async () => {
+    if (!selectedDate) return;
+    setVolunteerSyncMessage(null);
+    try {
+      const res = await fetch("/api/schedule/volunteers", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ dateLabel: selectedDate, staging: true }),
+      });
+      const json = await res.json();
+      if (!res.ok) {
+        throw new Error(json.error || "Failed to sync volunteers");
+      }
+      setVolunteerSyncMessage(
+        `Added ${json.added || 0} volunteers and removed ${json.removed || 0} rows.`
+      );
+      await refreshSchedule();
+    } catch (err) {
+      console.error("Failed to sync volunteers", err);
+      setVolunteerSyncMessage("Unable to sync volunteers right now.");
+    }
+  };
+
+  const addCustomPersonRow = async () => {
+    if (!newPersonName.trim() || !selectedDate) return;
+    try {
+      const res = await fetch("/api/schedule/people", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: newPersonName.trim(),
+          dateLabel: selectedDate,
+          staging: true,
+        }),
+      });
+      const json = await res.json();
+      if (!res.ok) {
+        throw new Error(json.error || "Failed to add person");
+      }
+      setNewPersonName("");
+      await refreshSchedule();
+    } catch (err) {
+      console.error("Failed to add person", err);
+      setMessage("Unable to add that person row.");
     }
   };
 
@@ -585,6 +769,80 @@ export default function AdminScheduleEditorPage() {
               Back to admin
             </Link>
           </div>
+          <div className="mt-3 flex flex-wrap items-end gap-3 text-xs text-[#6a6c4d]">
+            <label className="flex flex-col gap-1">
+              <span className="text-[10px] uppercase tracking-[0.12em] text-[#7a7f54]">
+                Schedule date
+              </span>
+              <input
+                type="date"
+                value={selectedDate ? formatLabelToInput(selectedDate) : ""}
+                onChange={(e) => {
+                  const next = formatDateInput(e.target.value);
+                  setSelectedDate(next);
+                }}
+                className="rounded-md border border-[#d0c9a4] bg-white px-2 py-1 text-xs text-[#314123] focus:border-[#8fae4c] focus:outline-none"
+              />
+            </label>
+            <label className="flex flex-col gap-1">
+              <span className="text-[10px] uppercase tracking-[0.12em] text-[#7a7f54]">
+                Existing schedules
+              </span>
+              <select
+                value={selectedDate}
+                onChange={(e) => setSelectedDate(e.target.value)}
+                className="rounded-md border border-[#d0c9a4] bg-white px-2 py-1 text-xs text-[#314123] focus:border-[#8fae4c] focus:outline-none"
+              >
+                <option value="">Select a date</option>
+                {availableSchedules.map((entry) => (
+                  <option key={entry.dateLabel} value={entry.dateLabel}>
+                    {entry.dateLabel}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <button
+              type="button"
+              onClick={() => ensureScheduleForDate(selectedDate)}
+              disabled={!selectedDate}
+              className="rounded-md border border-[#d0c9a4] bg-white px-3 py-1 font-semibold uppercase tracking-[0.08em] text-[#314123] shadow-sm transition hover:bg-[#f1edd8] disabled:opacity-60"
+            >
+              Create schedule
+            </button>
+            <button
+              type="button"
+              onClick={publishSchedule}
+              disabled={!selectedDate || scheduleMissing}
+              className="rounded-md bg-[#8fae4c] px-3 py-1 font-semibold uppercase tracking-[0.08em] text-[#f9f9ec] shadow-sm transition hover:bg-[#7e9c44] disabled:opacity-60"
+            >
+              Publish
+            </button>
+            <button
+              type="button"
+              onClick={syncVolunteers}
+              disabled={!selectedDate}
+              className="rounded-md border border-[#d0c9a4] bg-[#f4f1df] px-3 py-1 font-semibold uppercase tracking-[0.08em] text-[#4b5133] shadow-sm transition hover:bg-[#ede6c6] disabled:opacity-60"
+            >
+              Add all volunteers
+            </button>
+          </div>
+          {scheduleMissing && (
+            <p className="mt-2 text-xs text-[#a05252]">
+              No schedule exists for {selectedDate}. Create it to begin editing.
+            </p>
+          )}
+          {selectedEntry && (
+            <p className="mt-1 text-xs text-[#6a6c4d]">
+              Live: {selectedEntry.liveId ? "ready" : "missing"} • Staging:{" "}
+              {selectedEntry.stagingId ? "ready" : "missing"}
+            </p>
+          )}
+          {scheduleNote && (
+            <p className="mt-2 text-xs text-[#4b5133]">{scheduleNote}</p>
+          )}
+          {volunteerSyncMessage && (
+            <p className="mt-1 text-xs text-[#4b5133]">{volunteerSyncMessage}</p>
+          )}
         </div>
       </div>
 
@@ -610,7 +868,34 @@ export default function AdminScheduleEditorPage() {
               </span>
             </div>
           </div>
+          <div className="mt-3 flex flex-wrap items-end gap-2 text-xs text-[#6a6c4d]">
+            <label className="flex flex-col gap-1">
+              <span className="text-[10px] uppercase tracking-[0.12em] text-[#7a7f54]">
+                Add custom person
+              </span>
+              <input
+                value={newPersonName}
+                onChange={(e) => setNewPersonName(e.target.value)}
+                placeholder="Type a name"
+                className="rounded-md border border-[#d0c9a4] bg-white px-2 py-1 text-xs text-[#314123] focus:border-[#8fae4c] focus:outline-none"
+              />
+            </label>
+            <button
+              type="button"
+              onClick={addCustomPersonRow}
+              disabled={!newPersonName.trim() || !selectedDate}
+              className="rounded-md border border-[#d0c9a4] bg-white px-3 py-1 font-semibold uppercase tracking-[0.08em] text-[#314123] shadow-sm transition hover:bg-[#f1edd8] disabled:opacity-60"
+            >
+              Add person row
+            </button>
+            <span className="text-[11px] text-[#7a7f54]">
+              {pendingCells.size ? "Saving updates…" : "All changes saved."}
+            </span>
+          </div>
 
+          {scheduleLoading && (
+            <p className="mt-2 text-xs text-[#7a7f54]">Loading schedule…</p>
+          )}
           <div className="mt-3 max-h-[calc(100vh-220px)] min-h-[50vh] overflow-auto rounded-xl border border-[#e2d7b5] bg-[#faf7eb] shadow-inner">
             <table className="min-w-full border-collapse text-sm">
               <thead className="bg-[#e5e7c5]">

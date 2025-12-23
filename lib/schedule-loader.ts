@@ -26,6 +26,13 @@ export type ScheduleData = {
   message?: string;
 };
 
+export type ScheduleDatabaseEntry = {
+  id: string;
+  title: string;
+  dateLabel: string;
+  isStaging: boolean;
+};
+
 function getPlainText(prop: any): string {
   if (!prop) return "";
 
@@ -76,13 +83,51 @@ function getTitlePropertyKey(meta: any): string {
   return "Name";
 }
 
-function formatScheduleDate(dateStr: string): string {
+export function formatScheduleDateLabel(dateStr: string): string {
   const dt = new Date(dateStr);
   if (Number.isNaN(dt.getTime())) return dateStr;
   const month = `${dt.getMonth() + 1}`.padStart(2, "0");
   const day = `${dt.getDate()}`.padStart(2, "0");
   const year = dt.getFullYear();
   return `${month}/${day}/${year}`;
+}
+
+function parseScheduleTitle(title: string): { dateLabel: string; isStaging: boolean } | null {
+  const trimmed = (title || "").trim();
+  if (!trimmed) return null;
+  const stagingMatch = trimmed.match(/^staging\s*-\s*(.+)$/i);
+  const rawDate = stagingMatch ? stagingMatch[1].trim() : trimmed;
+  const formatted = formatScheduleDateLabel(rawDate);
+  if (!formatted) return null;
+  return { dateLabel: formatted, isStaging: Boolean(stagingMatch) };
+}
+
+function parseDateValue(dateLabel: string) {
+  const parts = dateLabel.split("/").map((p) => Number(p));
+  if (parts.length !== 3) return null;
+  const [month, day, year] = parts;
+  if (!month || !day || !year) return null;
+  const dt = new Date(year, month - 1, day);
+  return Number.isNaN(dt.getTime()) ? null : dt;
+}
+
+export function scheduleTitleForDate(dateLabel: string, staging = false) {
+  const formatted = formatScheduleDateLabel(dateLabel);
+  return staging ? `Staging - ${formatted}` : formatted;
+}
+
+export function buildDatabasePropertiesFromMeta(meta: any) {
+  const properties: Record<string, any> = {};
+  const source = meta?.properties || {};
+
+  Object.entries(source).forEach(([name, prop]: [string, any]) => {
+    const type = prop?.type;
+    if (!type) return;
+    const config = prop?.[type] ?? {};
+    properties[name] = { [type]: config };
+  });
+
+  return properties;
 }
 
 function extractHawaiiTime(dateStr?: string): string {
@@ -112,9 +157,19 @@ function normalizeTaskValue(task: string): string {
   return trimmed;
 }
 
-export async function resolveScheduleDatabase() {
+export async function resolveScheduleDatabase(
+  options: {
+    dateLabel?: string;
+    staging?: boolean;
+  } = {}
+) {
+  const { dateLabel, staging = false } = options;
+
   try {
     const meta = await retrieveDatabase(SCHEDULE_DB_ID);
+    if (dateLabel) {
+      throw new Error("Schedule root is a database; date selection is unavailable.");
+    }
     return { databaseId: SCHEDULE_DB_ID, databaseMeta: meta };
   } catch (err) {
     console.warn("Schedule ID is not a database, attempting to read page children");
@@ -197,37 +252,96 @@ export async function resolveScheduleDatabase() {
     taskResetRow?.properties?.["Selected Schedule"]?.date?.start || ""
   );
 
-  if (!selectedDate) {
+  const scheduleDate = dateLabel
+    ? formatScheduleDateLabel(dateLabel)
+    : selectedDate
+      ? formatScheduleDateLabel(selectedDate)
+      : "";
+
+  if (!scheduleDate) {
     throw new Error("Selected Schedule date is not configured in Notion");
   }
 
-  const formattedDate = formatScheduleDate(selectedDate);
+  const expectedTitle = staging ? `Staging - ${scheduleDate}` : scheduleDate;
 
   const targetDb = childDatabases.find(
-    (db: any) => (db.child_database?.title || "").trim() === formattedDate
+    (db: any) => (db.child_database?.title || "").trim() === expectedTitle
   );
 
   if (!targetDb) {
-    throw new Error(`No schedule database found for ${formattedDate}`);
+    throw new Error(`No schedule database found for ${expectedTitle}`);
   }
 
   const databaseMeta = await retrieveDatabase(targetDb.id);
   return {
     databaseId: targetDb.id,
     databaseMeta,
-    scheduleDate: formattedDate,
+    scheduleDate,
     reportTime: reportTimeValue,
     taskResetTime,
   };
 }
 
-export async function loadScheduleData(): Promise<ScheduleData> {
+export async function listScheduleDatabases(): Promise<{
+  mode: "database" | "page";
+  schedules: ScheduleDatabaseEntry[];
+  settingsDatabaseId?: string;
+}> {
+  try {
+    await retrieveDatabase(SCHEDULE_DB_ID);
+    return { mode: "database", schedules: [] };
+  } catch (err) {
+    console.warn("Schedule ID is not a database, listing page children");
+  }
+
+  const children = await listAllBlockChildren(SCHEDULE_DB_ID);
+  const childDatabases = (children.results || []).filter(
+    (block: any) => block.type === "child_database"
+  );
+
+  const settingsDb = childDatabases.find(
+    (db: any) =>
+      (db.child_database?.title || "").trim().toLowerCase() === "settings"
+  );
+
+  const schedules = childDatabases
+    .map((db: any) => {
+      const title = (db.child_database?.title || "").trim();
+      if (!title || title.toLowerCase() === "settings") return null;
+      const parsed = parseScheduleTitle(title);
+      if (!parsed) return null;
+      return {
+        id: db.id,
+        title,
+        dateLabel: parsed.dateLabel,
+        isStaging: parsed.isStaging,
+      } as ScheduleDatabaseEntry;
+    })
+    .filter(Boolean) as ScheduleDatabaseEntry[];
+
+  schedules.sort((a, b) => {
+    const aDate = parseDateValue(a.dateLabel);
+    const bDate = parseDateValue(b.dateLabel);
+    if (aDate && bDate) return aDate.getTime() - bDate.getTime();
+    return a.dateLabel.localeCompare(b.dateLabel);
+  });
+
+  return {
+    mode: "page",
+    schedules,
+    settingsDatabaseId: settingsDb?.id,
+  };
+}
+
+export async function loadScheduleData(
+  options: { dateLabel?: string; staging?: boolean } = {}
+): Promise<ScheduleData> {
   if (!SCHEDULE_DB_ID) {
     throw new Error("NOTION_SCHEDULE_DATABASE_ID is not set");
   }
 
   try {
-    const resolution = await resolveScheduleDatabase();
+    const resolution = await resolveScheduleDatabase(options);
     const data = await queryAllDatabasePages(resolution.databaseId);
     const pages = data.results || [];
 

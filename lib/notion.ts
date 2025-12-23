@@ -133,6 +133,35 @@ export async function createPageUnderPage(
   return res.json();
 }
 
+export async function createDatabase(
+  parentPageId: string,
+  title: string,
+  properties: Record<string, any>
+) {
+  const res = await fetch(`${NOTION_BASE_URL}/databases`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${NOTION_TOKEN}`,
+      "Notion-Version": NOTION_VERSION,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      parent: { type: "page_id", page_id: parentPageId },
+      title: [{ type: "text", text: { content: title } }],
+      properties,
+    }),
+    cache: "no-store",
+  });
+
+  if (!res.ok) {
+    const text = await res.text();
+    console.error("Notion create database error:", res.status, text);
+    throw new Error(`Failed to create Notion database: ${res.status}`);
+  }
+
+  return res.json();
+}
+
 export async function retrieveDatabase(databaseId: string) {
   const res = await fetch(`${NOTION_BASE_URL}/databases/${databaseId}`, {
     headers: {
@@ -167,6 +196,27 @@ export async function updatePage(pageId: string, properties: any) {
     const text = await res.text();
     console.error("Notion update error:", res.status, text);
     throw new Error(`Failed to update Notion page: ${res.status}`);
+  }
+
+  return res.json();
+}
+
+export async function archivePage(pageId: string, archived = true) {
+  const res = await fetch(`${NOTION_BASE_URL}/pages/${pageId}`, {
+    method: "PATCH",
+    headers: {
+      Authorization: `Bearer ${NOTION_TOKEN}`,
+      "Notion-Version": NOTION_VERSION,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ archived }),
+    cache: "no-store",
+  });
+
+  if (!res.ok) {
+    const text = await res.text();
+    console.error("Notion archive error:", res.status, text);
+    throw new Error(`Failed to archive Notion page: ${res.status}`);
   }
 
   return res.json();
