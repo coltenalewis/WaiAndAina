@@ -49,6 +49,17 @@ export default function HomePage() {
     if (!session?.userType) return false;
     return allowedWorkTypes.includes(session.userType.toLowerCase());
   }, [session?.userType]);
+  const shouldAutoRouteToSchedule = useMemo(() => {
+    if (!session?.userType) return false;
+    return ["admin", "volunteer", "external volunteer"].includes(
+      session.userType.toLowerCase()
+    );
+  }, [session?.userType]);
+
+  useEffect(() => {
+    if (!shouldAutoRouteToSchedule) return;
+    router.replace("/hub");
+  }, [router, shouldAutoRouteToSchedule]);
 
   function handleLogout() {
     clearSession();

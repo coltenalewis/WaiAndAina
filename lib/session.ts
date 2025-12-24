@@ -10,7 +10,7 @@ export type UserSession = {
 
 export function getHubLandingPath(userType?: string | null) {
   const normalized = (userType || "").toLowerCase();
-  if (["volunteer", "admin"].includes(normalized)) {
+  if (["volunteer", "admin", "external volunteer"].includes(normalized)) {
     return "/hub";
   }
   return "/hub/dashboard";
