@@ -165,6 +165,9 @@ export default function HubSchedulePage() {
   const [taskMetaMap, setTaskMetaMap] = useState<Record<string, TaskMeta>>({});
   const [taskTypes, setTaskTypes] = useState<TaskTypeOption[]>([]);
   const [statusOptions, setStatusOptions] = useState<StatusOption[]>([]);
+  const scheduleFetchInFlight = useRef(false);
+  const scheduleLastFetchAt = useRef(0);
+  const scheduleRefreshIntervalMs = 120_000;
 
   // Modal state
   const [modalTask, setModalTask] = useState<TaskClickPayload | null>(null);
@@ -175,6 +178,7 @@ export default function HubSchedulePage() {
   const [weekSchedules, setWeekSchedules] = useState<
     Record<string, ScheduleResponse | null>
   >({});
+  const weekSchedulesRef = useRef<Record<string, ScheduleResponse | null>>({});
   const [weekDays, setWeekDays] = useState<{ day: string; dateLabel: string }[]>(
     []
   );
@@ -220,6 +224,9 @@ export default function HubSchedulePage() {
   }, [statusOptions]);
 
   const scheduleDateLabel = data?.scheduleDate;
+  useEffect(() => {
+    weekSchedulesRef.current = weekSchedules;
+  }, [weekSchedules]);
   const formatDateLabel = useCallback((date: Date) => {
     const month = `${date.getMonth() + 1}`.padStart(2, "0");
     const day = `${date.getDate()}`.padStart(2, "0");
@@ -257,18 +264,26 @@ export default function HubSchedulePage() {
   }, [formatDateLabel, scheduleDateObj]);
 
   useEffect(() => {
+    if (!scheduleDateLabel || !data) return;
+    setWeekSchedules((prev) => ({
+      ...prev,
+      [scheduleDateLabel]: data,
+    }));
+  }, [data, scheduleDateLabel]);
+
+  useEffect(() => {
     if (!weekDays.length || !scheduleDateLabel) return;
     let cancelled = false;
 
     const loadWeek = async () => {
       const next: Record<string, ScheduleResponse | null> = {};
+      const pending = weekDays.filter(({ dateLabel }) => {
+        if (dateLabel === scheduleDateLabel) return false;
+        return weekSchedulesRef.current[dateLabel] === undefined;
+      });
 
       await Promise.all(
-        weekDays.map(async ({ dateLabel }) => {
-          if (dateLabel === scheduleDateLabel && data) {
-            next[dateLabel] = data;
-            return;
-          }
+        pending.map(async ({ dateLabel }) => {
           try {
             const res = await fetch(
               `/api/schedule?date=${encodeURIComponent(dateLabel)}`,
@@ -285,8 +300,8 @@ export default function HubSchedulePage() {
         })
       );
 
-      if (!cancelled) {
-        setWeekSchedules(next);
+      if (!cancelled && Object.keys(next).length) {
+        setWeekSchedules((prev) => ({ ...prev, ...next }));
       }
     };
 
@@ -294,7 +309,7 @@ export default function HubSchedulePage() {
     return () => {
       cancelled = true;
     };
-  }, [data, scheduleDateLabel, weekDays]);
+  }, [scheduleDateLabel, weekDays]);
 
   const isScheduleToday = useMemo(() => {
     if (!scheduleDateObj) return false;
@@ -646,8 +661,15 @@ export default function HubSchedulePage() {
 
   // Load schedule data from Notion-backed API (with auto-refresh)
   const loadSchedule = useCallback(
-    async (opts: { showLoading?: boolean } = {}) => {
-      const { showLoading = false } = opts;
+    async (opts: { showLoading?: boolean; force?: boolean } = {}) => {
+      const { showLoading = false, force = false } = opts;
+      const now = Date.now();
+      if (scheduleFetchInFlight.current) return;
+      if (!force && now - scheduleLastFetchAt.current < scheduleRefreshIntervalMs) {
+        return;
+      }
+      scheduleFetchInFlight.current = true;
+      scheduleLastFetchAt.current = now;
       if (showLoading) setLoading(true);
       setError(null);
 
@@ -663,16 +685,30 @@ export default function HubSchedulePage() {
         console.error(e);
         setError("Unable to load schedule. Please refresh when online.");
       } finally {
+        scheduleFetchInFlight.current = false;
         if (showLoading) setLoading(false);
       }
     },
-    []
+    [scheduleRefreshIntervalMs]
   );
 
   useEffect(() => {
-    loadSchedule({ showLoading: true });
-    const interval = setInterval(() => loadSchedule(), 45_000);
-    return () => clearInterval(interval);
+    loadSchedule({ showLoading: true, force: true });
+    const interval = setInterval(() => {
+      if (document.visibilityState === "visible") {
+        loadSchedule();
+      }
+    }, scheduleRefreshIntervalMs);
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        loadSchedule();
+      }
+    };
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () => {
+      clearInterval(interval);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
   }, [loadSchedule]);
 
   // Preload task status/description for tagging
@@ -1595,6 +1631,13 @@ async function handleTaskClick(taskPayload: TaskClickPayload) {
                   />
                   Only me
                 </label>
+                <button
+                  type="button"
+                  onClick={() => loadSchedule({ showLoading: true, force: true })}
+                  className="inline-flex items-center gap-2 rounded-full border border-[#d0c9a4] bg-white/80 px-3 py-1 text-xs font-semibold uppercase tracking-[0.12em] text-[#4a5b2a] shadow-sm transition hover:bg-white"
+                >
+                  Refresh
+                </button>
               </div>
 
               {activeView === "schedule" && (
