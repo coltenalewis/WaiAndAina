@@ -158,7 +158,7 @@ export default function HubSchedulePage() {
   const scheduleScrollRef = useRef<HTMLDivElement | null>(null);
 
   const [activeView, setActiveView] = useState<"schedule" | "myTasks">(
-    "schedule"
+    "myTasks"
   );
   const [showMineOnly, setShowMineOnly] = useState(false);
 

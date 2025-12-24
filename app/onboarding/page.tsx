@@ -3,7 +3,7 @@
 import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { saveSession, UserSession } from "@/lib/session";
+import { getHubLandingPath, saveSession, UserSession } from "@/lib/session";
 
 const DEFAULT_PASSCODE = "WAIANDAINA";
 
@@ -134,7 +134,7 @@ function OnboardingContent() {
         };
         const formatted = formatSession(session);
         saveSession(formatted as UserSession);
-        router.push("/hub/dashboard");
+        router.push(getHubLandingPath(loginJson.userType));
       } else {
         router.push("/welcome");
       }

@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { loadSession } from "@/lib/session";
+import { getHubLandingPath, loadSession } from "@/lib/session";
 
 export default function WelcomePage() {
   const router = useRouter();
@@ -17,7 +17,7 @@ export default function WelcomePage() {
     setName(session.name);
 
     const timeout = setTimeout(() => {
-      router.replace("/hub/dashboard");
+      router.replace(getHubLandingPath(session.userType));
     }, 2500);
 
     return () => clearTimeout(timeout);

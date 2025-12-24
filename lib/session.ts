@@ -8,6 +8,14 @@ export type UserSession = {
   userTypeColor?: string | null;
 };
 
+export function getHubLandingPath(userType?: string | null) {
+  const normalized = (userType || "").toLowerCase();
+  if (["volunteer", "admin"].includes(normalized)) {
+    return "/hub";
+  }
+  return "/hub/dashboard";
+}
+
 export function saveSession(session: UserSession) {
   if (typeof window === "undefined") return;
   localStorage.setItem(SESSION_KEY, JSON.stringify(session));
