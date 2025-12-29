@@ -841,9 +841,10 @@ export default function HubSchedulePage() {
     [workSlots]
   );
 
-  const weekendSlots = useMemo(
-    () => workSlots.filter((slot) => /weekend/i.test(slot.label)),
-    [workSlots]
+  const weekendDays = useMemo(
+    () =>
+      weekDays.filter((entry) => /saturday|sunday/i.test(entry.day)),
+    [weekDays]
   );
 
   type ShiftTaskCell = {
@@ -853,6 +854,8 @@ export default function HubSchedulePage() {
 
   type EveningDayRow = {
     day: string;
+    breakfastDishes: string[];
+    lunchDishes: string[];
     condoCleaning: string[];
     eveningShift: string[];
     isActiveDay: boolean;
@@ -864,15 +867,20 @@ export default function HubSchedulePage() {
     people: string[];
   };
 
-  type WeekendSlotSummary = {
-    slot: Slot;
-    people: string[];
+  type WeekendDaySummary = {
+    day: string;
+    dateLabel: string;
+    weekendAm: string[];
+    weekendPm: string[];
+    isActiveDay: boolean;
   };
 
   type WeekendIndexTask = {
     task: string;
     slot: Slot;
     people: string[];
+    day: string;
+    dateLabel: string;
   };
 
   const shiftTaskAssignments = useCallback(
@@ -931,8 +939,11 @@ export default function HubSchedulePage() {
 
 
   const weekendScheduleSummary = useMemo(() => {
-    if (!data || weekendSlots.length === 0) {
-      return { slotRows: [] as WeekendSlotSummary[], indexTasks: [] as WeekendIndexTask[] };
+    if (!data || weekendDays.length === 0) {
+      return {
+        dayRows: [] as WeekendDaySummary[],
+        indexTasks: [] as WeekendIndexTask[],
+      };
     }
 
     const sortNames = (names: string[]) => {
@@ -946,50 +957,110 @@ export default function HubSchedulePage() {
       return [unique[meIndex], ...unique.filter((_, idx) => idx !== meIndex)];
     };
 
-    const slotRows = weekendSlots.map((slot) => {
-      const slotIdx = data.slots.findIndex((s) => s.id === slot.id);
-      if (slotIdx === -1) {
-        return { slot, people: [] };
-      }
+    const collectShiftPeople = (
+      schedule: ScheduleResponse | null,
+      filterFn: (slot: Slot) => boolean
+    ) => {
+      if (!schedule) return [] as string[];
+      const slotIndices = schedule.slots
+        .filter(filterFn)
+        .map((slot) => schedule.slots.findIndex((s) => s.id === slot.id))
+        .filter((idx) => idx !== -1);
 
-      const people = data.people.filter((person, rowIdx) => {
-        const cell = (data.cells[rowIdx]?.[slotIdx] ?? "").trim();
-        return splitCellTasks(cell).length > 0;
-      });
+      if (slotIndices.length === 0) return [];
 
-      return { slot, people: sortNames(people) };
+      const people = schedule.people.filter((_, rowIdx) =>
+        slotIndices.some((idx) => {
+          const cell = (schedule.cells[rowIdx]?.[idx] ?? "").trim();
+          return splitCellTasks(cell).length > 0;
+        })
+      );
+
+      return sortNames(people);
+    };
+
+    const isWeekendAmSlot = (slot: Slot) =>
+      /weekend/i.test(slot.label) && /am|morning/i.test(slot.label);
+
+    const isWeekendPmSlot = (slot: Slot) =>
+      /weekend/i.test(slot.label) && /pm|afternoon|evening/i.test(slot.label);
+
+    const dayRows = weekendDays.map(({ day, dateLabel }) => {
+      const schedule =
+        dateLabel === scheduleDateLabel
+          ? data
+          : weekSchedules[dateLabel] || null;
+      return {
+        day,
+        dateLabel,
+        weekendAm: collectShiftPeople(schedule, isWeekendAmSlot),
+        weekendPm: collectShiftPeople(schedule, isWeekendPmSlot),
+        isActiveDay: scheduleDayName?.toLowerCase() === day.toLowerCase(),
+      };
     });
 
-    const indexMap = new Map<string, { task: string; slot: Slot; people: Set<string> }>();
-    weekendSlots.forEach((slot) => {
-      const slotIdx = data.slots.findIndex((s) => s.id === slot.id);
-      if (slotIdx === -1) return;
-      data.people.forEach((person, rowIdx) => {
-        const cell = (data.cells[rowIdx]?.[slotIdx] ?? "").trim();
-        if (!cell) return;
-        splitCellTasks(cell).forEach((task) => {
-          const base = taskBaseName(task);
-          if (!base) return;
-          const key = base.toLowerCase();
-          if (!indexMap.has(key)) {
-            indexMap.set(key, { task: base, slot, people: new Set() });
-          }
-          indexMap.get(key)?.people.add(person);
+    const indexMap = new Map<
+      string,
+      { task: string; slot: Slot; people: Set<string>; day: string; dateLabel: string }
+    >();
+
+    weekendDays.forEach(({ day, dateLabel }) => {
+      const schedule =
+        dateLabel === scheduleDateLabel
+          ? data
+          : weekSchedules[dateLabel] || null;
+      if (!schedule) return;
+
+      schedule.slots.forEach((slot, slotIdx) => {
+        schedule.people.forEach((person, rowIdx) => {
+          const cell = (schedule.cells[rowIdx]?.[slotIdx] ?? "").trim();
+          if (!cell) return;
+          splitCellTasks(cell).forEach((task) => {
+            const base = taskBaseName(task);
+            if (!base) return;
+            const key = `${dateLabel}-${slot.id}-${base.toLowerCase()}`;
+            if (!indexMap.has(key)) {
+              indexMap.set(key, {
+                task: base,
+                slot,
+                people: new Set(),
+                day,
+                dateLabel,
+              });
+            }
+            indexMap.get(key)?.people.add(person);
+          });
         });
       });
     });
 
     const indexTasks = Array.from(indexMap.values())
-      .filter((entry) => entry.people.size > 1)
       .map((entry) => ({
         task: entry.task,
         slot: entry.slot,
         people: Array.from(entry.people),
+        day: entry.day,
+        dateLabel: entry.dateLabel,
       }))
-      .sort((a, b) => a.task.localeCompare(b.task));
+      .sort((a, b) => {
+        if (a.dateLabel !== b.dateLabel) {
+          return a.dateLabel.localeCompare(b.dateLabel);
+        }
+        if (a.slot.label !== b.slot.label) {
+          return a.slot.label.localeCompare(b.slot.label);
+        }
+        return a.task.localeCompare(b.task);
+      });
 
-    return { slotRows, indexTasks };
-  }, [currentUserName, data, weekendSlots]);
+    return { dayRows, indexTasks };
+  }, [
+    currentUserName,
+    data,
+    scheduleDateLabel,
+    scheduleDayName,
+    weekSchedules,
+    weekendDays,
+  ]);
 
   const eveningScheduleSummary = useMemo(() => {
     const baseRows: EveningDayRow[] = (weekDays.length
@@ -1005,6 +1076,8 @@ export default function HubSchedulePage() {
         ]
     ).map((day) => ({
       day,
+      breakfastDishes: [],
+      lunchDishes: [],
       condoCleaning: [],
       eveningShift: [],
       isActiveDay: scheduleDayName?.toLowerCase() === day.toLowerCase(),
@@ -1023,7 +1096,12 @@ export default function HubSchedulePage() {
 
     const collectAssignments = (schedule: ScheduleResponse | null) => {
       if (!schedule) {
-        return { condo: [] as string[], evening: [] as string[] };
+        return {
+          breakfast: [] as string[],
+          lunch: [] as string[],
+          condo: [] as string[],
+          evening: [] as string[],
+        };
       }
 
       const slotIndices = schedule.slots
@@ -1036,12 +1114,29 @@ export default function HubSchedulePage() {
         .map((slot) => schedule.slots.findIndex((s) => s.id === slot.id))
         .filter((idx) => idx !== -1);
 
+      const breakfastSlotIndices = schedule.slots
+        .filter((slot) => slot.isMeal && /breakfast/i.test(slot.label))
+        .map((slot) => schedule.slots.findIndex((s) => s.id === slot.id))
+        .filter((idx) => idx !== -1);
+
+      const lunchSlotIndices = schedule.slots
+        .filter((slot) => slot.isMeal && /lunch/i.test(slot.label))
+        .map((slot) => schedule.slots.findIndex((s) => s.id === slot.id))
+        .filter((idx) => idx !== -1);
+
       const condo = new Set<string>();
       const evening = new Set<string>();
+      const breakfast = new Set<string>();
+      const lunch = new Set<string>();
+
+      const isDishesTask = (task: string) =>
+        /dishes?/i.test(taskBaseName(task));
 
       schedule.people.forEach((person, rowIdx) => {
         let hasNonCondo = false;
         let hasCondo = false;
+        let hasBreakfastDishes = false;
+        let hasLunchDishes = false;
 
         slotIndices.forEach((idx) => {
           const cell = (schedule.cells[rowIdx]?.[idx] ?? "").trim();
@@ -1058,11 +1153,33 @@ export default function HubSchedulePage() {
           });
         });
 
+        breakfastSlotIndices.forEach((idx) => {
+          const cell = (schedule.cells[rowIdx]?.[idx] ?? "").trim();
+          if (!cell) return;
+          const tasks = splitCellTasks(cell);
+          if (tasks.some((task) => isDishesTask(task))) {
+            hasBreakfastDishes = true;
+          }
+        });
+
+        lunchSlotIndices.forEach((idx) => {
+          const cell = (schedule.cells[rowIdx]?.[idx] ?? "").trim();
+          if (!cell) return;
+          const tasks = splitCellTasks(cell);
+          if (tasks.some((task) => isDishesTask(task))) {
+            hasLunchDishes = true;
+          }
+        });
+
         if (hasCondo) condo.add(person);
         if (hasNonCondo) evening.add(person);
+        if (hasBreakfastDishes) breakfast.add(person);
+        if (hasLunchDishes) lunch.add(person);
       });
 
       return {
+        breakfast: sortNames(Array.from(breakfast)),
+        lunch: sortNames(Array.from(lunch)),
         condo: sortNames(Array.from(condo)),
         evening: sortNames(Array.from(evening)),
       };
@@ -1078,9 +1195,13 @@ export default function HubSchedulePage() {
           : row.isActiveDay
             ? data
             : null;
-      const { condo, evening } = collectAssignments(schedule || null);
+      const { breakfast, lunch, condo, evening } = collectAssignments(
+        schedule || null
+      );
       return {
         ...row,
+        breakfastDishes: breakfast,
+        lunchDishes: lunch,
         condoCleaning: condo,
         eveningShift: evening,
       };
@@ -1138,10 +1259,16 @@ export default function HubSchedulePage() {
 
   const eveningHasContent =
     eveningScheduleSummary.dayRows.some(
-      (row) => row.condoCleaning.length > 0 || row.eveningShift.length > 0
+      (row) =>
+        row.breakfastDishes.length > 0 ||
+        row.lunchDishes.length > 0 ||
+        row.condoCleaning.length > 0 ||
+        row.eveningShift.length > 0
     ) || eveningScheduleSummary.indexTasks.length > 0;
   const weekendHasContent =
-    weekendScheduleSummary.slotRows.some((row) => row.people.length > 0) ||
+    weekendScheduleSummary.dayRows.some(
+      (row) => row.weekendAm.length > 0 || row.weekendPm.length > 0
+    ) ||
     weekendScheduleSummary.indexTasks.length > 0;
 
   const showEveningSection =
@@ -1759,8 +1886,8 @@ async function handleTaskClick(taskPayload: TaskClickPayload) {
           data &&
           showEveningSection && (
             <EveningScheduleTable
-              title="Evening Schedule"
-              description="Evening shift coverage laid out by weekday with a rollup of shared evening tasks."
+              title="Week Overview"
+              description="Weekday coverage for meals, condo cleaning, and evening shifts with shared task rollups."
               dayRows={eveningScheduleSummary.dayRows}
               indexTasks={eveningScheduleSummary.indexTasks}
               onTaskClick={handleTaskClick}
@@ -1776,8 +1903,8 @@ async function handleTaskClick(taskPayload: TaskClickPayload) {
           showWeekendSection && (
             <WeekendScheduleTable
               title="Weekend Schedule"
-              description="Weekend shift coverage with assignments by shift."
-              slotRows={weekendScheduleSummary.slotRows}
+              description="Upcoming Saturday and Sunday coverage with assigned teammates and a task bank."
+              dayRows={weekendScheduleSummary.dayRows}
               indexTasks={weekendScheduleSummary.indexTasks}
               onTaskClick={handleTaskClick}
               taskMetaMap={taskMetaMap}
@@ -2977,6 +3104,8 @@ function EveningScheduleTable({
   description: string;
   dayRows: {
     day: string;
+    breakfastDishes: string[];
+    lunchDishes: string[];
     condoCleaning: string[];
     eveningShift: string[];
     isActiveDay: boolean;
@@ -3032,11 +3161,17 @@ function EveningScheduleTable({
         <p className="text-sm text-[#7a7f54]">{description}</p>
       </div>
 
-      <div className="overflow-x-auto rounded-lg border border-[#d0c9a4] bg-white/85 shadow-sm">
-        <table className="min-w-full border-collapse text-left text-sm text-[#4f5730]">
+      <div className="w-full overflow-x-auto rounded-lg border border-[#d0c9a4] bg-white/85 shadow-sm">
+        <table className="w-full min-w-[720px] border-collapse text-left text-sm text-[#4f5730]">
           <thead className="bg-[#f4f1df] text-[11px] uppercase tracking-[0.14em] text-[#6b6f4c]">
             <tr>
               <th className="px-4 py-3 border-b border-[#e2d7b5]">Day</th>
+              <th className="px-4 py-3 border-b border-[#e2d7b5]">
+                Breakfast dishes
+              </th>
+              <th className="px-4 py-3 border-b border-[#e2d7b5]">
+                Lunch dishes
+              </th>
               <th className="px-4 py-3 border-b border-[#e2d7b5]">
                 Condo Cleaning
               </th>
@@ -3053,6 +3188,16 @@ function EveningScheduleTable({
               const eveningHasUser = normalizedUser
                 ? row.eveningShift.some((p) => p.toLowerCase() === normalizedUser)
                 : false;
+              const breakfastHasUser = normalizedUser
+                ? row.breakfastDishes.some(
+                    (p) => p.toLowerCase() === normalizedUser
+                  )
+                : false;
+              const lunchHasUser = normalizedUser
+                ? row.lunchDishes.some(
+                    (p) => p.toLowerCase() === normalizedUser
+                  )
+                : false;
 
               return (
                 <tr
@@ -3061,6 +3206,20 @@ function EveningScheduleTable({
                 >
                   <td className="px-4 py-3 border-b border-[#eee6c8] font-semibold text-[#3e4c24]">
                     {row.day}
+                  </td>
+                  <td
+                    className={`px-4 py-3 border-b border-[#eee6c8] ${
+                      breakfastHasUser ? "ring-2 ring-[#d2e4a0] ring-inset" : ""
+                    }`}
+                  >
+                    {renderNames(row.breakfastDishes)}
+                  </td>
+                  <td
+                    className={`px-4 py-3 border-b border-[#eee6c8] ${
+                      lunchHasUser ? "ring-2 ring-[#d2e4a0] ring-inset" : ""
+                    }`}
+                  >
+                    {renderNames(row.lunchDishes)}
                   </td>
                   <td
                     className={`px-4 py-3 border-b border-[#eee6c8] ${
@@ -3158,7 +3317,7 @@ function EveningScheduleTable({
 function WeekendScheduleTable({
   title,
   description,
-  slotRows,
+  dayRows,
   indexTasks,
   onTaskClick,
   taskMetaMap,
@@ -3167,8 +3326,20 @@ function WeekendScheduleTable({
 }: {
   title: string;
   description: string;
-  slotRows: { slot: Slot; people: string[] }[];
-  indexTasks: { task: string; slot: Slot; people: string[] }[];
+  dayRows: {
+    day: string;
+    dateLabel: string;
+    weekendAm: string[];
+    weekendPm: string[];
+    isActiveDay: boolean;
+  }[];
+  indexTasks: {
+    task: string;
+    slot: Slot;
+    people: string[];
+    day: string;
+    dateLabel: string;
+  }[];
   onTaskClick?: (payload: TaskClickPayload) => void;
   taskMetaMap: Record<string, TaskMeta>;
   statusColors: Record<string, string>;
@@ -3219,45 +3390,64 @@ function WeekendScheduleTable({
         <p className="text-sm text-[#7a7f54]">{description}</p>
       </div>
 
-      <div className="overflow-x-auto rounded-lg border border-[#d0c9a4] bg-white/85 shadow-sm">
-        <table className="min-w-full border-collapse text-left text-sm text-[#4f5730]">
+      <div className="w-full overflow-x-auto rounded-lg border border-[#d0c9a4] bg-white/85 shadow-sm">
+        <table className="w-full min-w-[640px] border-collapse text-left text-sm text-[#4f5730]">
           <thead className="bg-[#f4f1df] text-[11px] uppercase tracking-[0.14em] text-[#6b6f4c]">
             <tr>
-              {slotRows.map((row) => (
-                <th
-                  key={row.slot.id}
-                  className="px-4 py-3 border-b border-[#e2d7b5]"
-                >
-                  <div className="flex flex-col">
-                    <span>{row.slot.label}</span>
-                    {row.slot.timeRange && (
-                      <span className="text-[10px] text-[#8a8256] normal-case">
-                        {row.slot.timeRange}
-                      </span>
-                    )}
-                  </div>
-                </th>
-              ))}
+              <th className="px-4 py-3 border-b border-[#e2d7b5]">Day</th>
+              <th className="px-4 py-3 border-b border-[#e2d7b5]">
+                Weekend AM
+              </th>
+              <th className="px-4 py-3 border-b border-[#e2d7b5]">
+                Weekend PM
+              </th>
             </tr>
           </thead>
           <tbody>
-            <tr>
-              {slotRows.map((row) => {
-                const hasUser = normalizedUser
-                  ? row.people.some((p) => p.toLowerCase() === normalizedUser)
-                  : false;
-                return (
+            {dayRows.map((row) => {
+              const amHasUser = normalizedUser
+                ? row.weekendAm.some(
+                    (person) => person.toLowerCase() === normalizedUser
+                  )
+                : false;
+              const pmHasUser = normalizedUser
+                ? row.weekendPm.some(
+                    (person) => person.toLowerCase() === normalizedUser
+                  )
+                : false;
+
+              return (
+                <tr
+                  key={`${row.dateLabel}-${row.day}`}
+                  className={row.isActiveDay ? "bg-[#f9f6e7]" : ""}
+                >
+                  <td className="px-4 py-3 border-b border-[#eee6c8] font-semibold text-[#3e4c24]">
+                    <div>{row.day}</div>
+                    <div className="text-[11px] text-[#8a8256]">
+                      {row.dateLabel}
+                    </div>
+                  </td>
                   <td
-                    key={row.slot.id}
-                    className={`px-4 py-4 border-b border-[#eee6c8] align-top ${
-                      hasUser ? "ring-2 ring-[#d2e4a0] ring-inset" : ""
+                    className={`px-4 py-3 border-b border-[#eee6c8] align-top ${
+                      amHasUser ? "ring-2 ring-[#d2e4a0] ring-inset" : ""
                     }`}
                   >
-                    {renderNames(row.people)}
+                    <div className="max-h-36 overflow-y-auto">
+                      {renderNames(row.weekendAm)}
+                    </div>
                   </td>
-                );
-              })}
-            </tr>
+                  <td
+                    className={`px-4 py-3 border-b border-[#eee6c8] align-top ${
+                      pmHasUser ? "ring-2 ring-[#d2e4a0] ring-inset" : ""
+                    }`}
+                  >
+                    <div className="max-h-36 overflow-y-auto">
+                      {renderNames(row.weekendPm)}
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>
@@ -3265,16 +3455,17 @@ function WeekendScheduleTable({
       <div className="space-y-2">
         <div className="flex items-center justify-between">
           <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[#5d7f3b]">
-            Weekend shift tasks
+            Weekend task bank
           </p>
         </div>
         {indexTasks.length === 0 ? (
           <p className="text-sm text-[#7a7f54] italic">
-            No shared weekend shift tasks listed yet.
+            No weekend tasks listed yet.
           </p>
         ) : (
-          <div className="grid gap-3 md:grid-cols-2">
-            {indexTasks.map((entry) => {
+          <div className="max-h-[420px] overflow-y-auto pr-1">
+            <div className="grid gap-3 md:grid-cols-2">
+              {indexTasks.map((entry) => {
               const participants = entry.people;
               const includesUser = normalizedUser
                 ? participants.some((p) => p.toLowerCase() === normalizedUser)
@@ -3288,7 +3479,7 @@ function WeekendScheduleTable({
 
               return (
                 <button
-                  key={`${entry.slot.id}-${entry.task}`}
+                  key={`${entry.dateLabel}-${entry.slot.id}-${entry.task}`}
                   type="button"
                   onClick={() =>
                     onTaskClick?.({
@@ -3304,8 +3495,15 @@ function WeekendScheduleTable({
                 >
                   <div className="flex items-start justify-between gap-2">
                     <div>
+                      <div className="text-[10px] uppercase tracking-[0.12em] text-[#7a7f54]">
+                        {entry.day} • {entry.dateLabel}
+                      </div>
                       <div className="font-semibold text-[#42502d]">
                         {entry.task}
+                      </div>
+                      <div className="text-[11px] text-[#7a7f54]">
+                        {entry.slot.label}
+                        {entry.slot.timeRange ? ` • ${entry.slot.timeRange}` : ""}
                       </div>
                       <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-[#7a7f54]">
                         <span className="rounded-full bg-white/80 px-2 py-[2px] text-[10px] font-semibold uppercase tracking-[0.12em] text-[#4f5730]">
@@ -3327,6 +3525,7 @@ function WeekendScheduleTable({
                 </button>
               );
             })}
+            </div>
           </div>
         )}
       </div>
