@@ -870,7 +870,8 @@ export default function HubSchedulePage() {
   type WeekendDaySummary = {
     day: string;
     dateLabel: string;
-    people: string[];
+    weekendAm: string[];
+    weekendPm: string[];
     isActiveDay: boolean;
   };
 
@@ -956,14 +957,33 @@ export default function HubSchedulePage() {
       return [unique[meIndex], ...unique.filter((_, idx) => idx !== meIndex)];
     };
 
-    const collectPeopleForDay = (schedule: ScheduleResponse | null) => {
+    const collectShiftPeople = (
+      schedule: ScheduleResponse | null,
+      filterFn: (slot: Slot) => boolean
+    ) => {
       if (!schedule) return [] as string[];
-      const people = schedule.people.filter((_, rowIdx) => {
-        const row = schedule.cells[rowIdx] ?? [];
-        return row.some((cell) => splitCellTasks(cell ?? "").length > 0);
-      });
+      const slotIndices = schedule.slots
+        .filter(filterFn)
+        .map((slot) => schedule.slots.findIndex((s) => s.id === slot.id))
+        .filter((idx) => idx !== -1);
+
+      if (slotIndices.length === 0) return [];
+
+      const people = schedule.people.filter((_, rowIdx) =>
+        slotIndices.some((idx) => {
+          const cell = (schedule.cells[rowIdx]?.[idx] ?? "").trim();
+          return splitCellTasks(cell).length > 0;
+        })
+      );
+
       return sortNames(people);
     };
+
+    const isWeekendAmSlot = (slot: Slot) =>
+      /weekend/i.test(slot.label) && /am|morning/i.test(slot.label);
+
+    const isWeekendPmSlot = (slot: Slot) =>
+      /weekend/i.test(slot.label) && /pm|afternoon|evening/i.test(slot.label);
 
     const dayRows = weekendDays.map(({ day, dateLabel }) => {
       const schedule =
@@ -973,7 +993,8 @@ export default function HubSchedulePage() {
       return {
         day,
         dateLabel,
-        people: collectPeopleForDay(schedule),
+        weekendAm: collectShiftPeople(schedule, isWeekendAmSlot),
+        weekendPm: collectShiftPeople(schedule, isWeekendPmSlot),
         isActiveDay: scheduleDayName?.toLowerCase() === day.toLowerCase(),
       };
     });
@@ -1245,7 +1266,9 @@ export default function HubSchedulePage() {
         row.eveningShift.length > 0
     ) || eveningScheduleSummary.indexTasks.length > 0;
   const weekendHasContent =
-    weekendScheduleSummary.dayRows.some((row) => row.people.length > 0) ||
+    weekendScheduleSummary.dayRows.some(
+      (row) => row.weekendAm.length > 0 || row.weekendPm.length > 0
+    ) ||
     weekendScheduleSummary.indexTasks.length > 0;
 
   const showEveningSection =
@@ -3306,7 +3329,8 @@ function WeekendScheduleTable({
   dayRows: {
     day: string;
     dateLabel: string;
-    people: string[];
+    weekendAm: string[];
+    weekendPm: string[];
     isActiveDay: boolean;
   }[];
   indexTasks: {
@@ -3366,43 +3390,66 @@ function WeekendScheduleTable({
         <p className="text-sm text-[#7a7f54]">{description}</p>
       </div>
 
-      <div className="overflow-x-auto">
-        <div className="flex min-w-[520px] gap-3 pb-2">
-          {dayRows.map((row) => {
-            const hasUser = normalizedUser
-              ? row.people.some((p) => p.toLowerCase() === normalizedUser)
-              : false;
-            return (
-              <div
-                key={`${row.dateLabel}-${row.day}`}
-                className={`min-w-[240px] rounded-lg border border-[#d0c9a4] bg-white/85 shadow-sm ${
-                  row.isActiveDay ? "bg-[#f9f6e7]" : ""
-                }`}
-              >
-                <div className="border-b border-[#e2d7b5] bg-[#f4f1df] px-4 py-3">
-                  <div className="text-xs uppercase tracking-[0.14em] text-[#6b6f4c]">
-                    {row.day}
-                  </div>
-                  <div className="text-[11px] text-[#8a8256]">
-                    {row.dateLabel}
-                  </div>
-                </div>
-                <div
-                  className={`px-4 py-3 ${
-                    hasUser ? "ring-2 ring-[#d2e4a0] ring-inset" : ""
-                  }`}
+      <div className="overflow-x-auto rounded-lg border border-[#d0c9a4] bg-white/85 shadow-sm">
+        <table className="min-w-[640px] border-collapse text-left text-sm text-[#4f5730]">
+          <thead className="bg-[#f4f1df] text-[11px] uppercase tracking-[0.14em] text-[#6b6f4c]">
+            <tr>
+              <th className="px-4 py-3 border-b border-[#e2d7b5]">Day</th>
+              <th className="px-4 py-3 border-b border-[#e2d7b5]">
+                Weekend AM
+              </th>
+              <th className="px-4 py-3 border-b border-[#e2d7b5]">
+                Weekend PM
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {dayRows.map((row) => {
+              const amHasUser = normalizedUser
+                ? row.weekendAm.some(
+                    (person) => person.toLowerCase() === normalizedUser
+                  )
+                : false;
+              const pmHasUser = normalizedUser
+                ? row.weekendPm.some(
+                    (person) => person.toLowerCase() === normalizedUser
+                  )
+                : false;
+
+              return (
+                <tr
+                  key={`${row.dateLabel}-${row.day}`}
+                  className={row.isActiveDay ? "bg-[#f9f6e7]" : ""}
                 >
-                  <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-[#5d7f3b]">
-                    Assigned
-                  </div>
-                  <div className="mt-2 max-h-36 overflow-y-auto">
-                    {renderNames(row.people)}
-                  </div>
-                </div>
-              </div>
-            );
-          })}
-        </div>
+                  <td className="px-4 py-3 border-b border-[#eee6c8] font-semibold text-[#3e4c24]">
+                    <div>{row.day}</div>
+                    <div className="text-[11px] text-[#8a8256]">
+                      {row.dateLabel}
+                    </div>
+                  </td>
+                  <td
+                    className={`px-4 py-3 border-b border-[#eee6c8] align-top ${
+                      amHasUser ? "ring-2 ring-[#d2e4a0] ring-inset" : ""
+                    }`}
+                  >
+                    <div className="max-h-36 overflow-y-auto">
+                      {renderNames(row.weekendAm)}
+                    </div>
+                  </td>
+                  <td
+                    className={`px-4 py-3 border-b border-[#eee6c8] align-top ${
+                      pmHasUser ? "ring-2 ring-[#d2e4a0] ring-inset" : ""
+                    }`}
+                  >
+                    <div className="max-h-36 overflow-y-auto">
+                      {renderNames(row.weekendPm)}
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
       </div>
 
       <div className="space-y-2">
