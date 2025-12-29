@@ -3161,8 +3161,8 @@ function EveningScheduleTable({
         <p className="text-sm text-[#7a7f54]">{description}</p>
       </div>
 
-      <div className="overflow-x-auto rounded-lg border border-[#d0c9a4] bg-white/85 shadow-sm">
-        <table className="min-w-[720px] border-collapse text-left text-sm text-[#4f5730]">
+      <div className="w-full overflow-x-auto rounded-lg border border-[#d0c9a4] bg-white/85 shadow-sm">
+        <table className="w-full min-w-[720px] border-collapse text-left text-sm text-[#4f5730]">
           <thead className="bg-[#f4f1df] text-[11px] uppercase tracking-[0.14em] text-[#6b6f4c]">
             <tr>
               <th className="px-4 py-3 border-b border-[#e2d7b5]">Day</th>
@@ -3390,8 +3390,8 @@ function WeekendScheduleTable({
         <p className="text-sm text-[#7a7f54]">{description}</p>
       </div>
 
-      <div className="overflow-x-auto rounded-lg border border-[#d0c9a4] bg-white/85 shadow-sm">
-        <table className="min-w-[640px] border-collapse text-left text-sm text-[#4f5730]">
+      <div className="w-full overflow-x-auto rounded-lg border border-[#d0c9a4] bg-white/85 shadow-sm">
+        <table className="w-full min-w-[640px] border-collapse text-left text-sm text-[#4f5730]">
           <thead className="bg-[#f4f1df] text-[11px] uppercase tracking-[0.14em] text-[#6b6f4c]">
             <tr>
               <th className="px-4 py-3 border-b border-[#e2d7b5]">Day</th>
