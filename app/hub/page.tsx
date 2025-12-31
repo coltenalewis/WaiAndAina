@@ -36,6 +36,7 @@ type TaskClickPayload = {
   task: string;          // full cell text
   groupNames: string[];  // all people sharing that merged box
   isMeal?: boolean;
+  taskSource?: "schedule" | "myTasks" | "report";
 };
 
 type TaskComment = {
@@ -174,6 +175,9 @@ export default function HubSchedulePage() {
   const [modalDetails, setModalDetails] = useState<TaskDetails | null>(null);
   const [modalLoading, setModalLoading] = useState(false);
   const [modalIsMeal, setModalIsMeal] = useState(false);
+  const [modalSource, setModalSource] = useState<
+    "schedule" | "myTasks" | "report"
+  >("schedule");
   const taskDetailsRequestRef = useRef(0);
   const [weekSchedules, setWeekSchedules] = useState<
     Record<string, ScheduleResponse | null>
@@ -511,7 +515,7 @@ export default function HubSchedulePage() {
   const isExternalVolunteer = normalizedUserType === "external volunteer";
   const isVolunteer = normalizedUserType === "volunteer";
   const isAdmin = normalizedUserType === "admin";
-  const showFullTaskDetail = !modalIsMeal;
+  const showFullTaskDetail = modalSource === "myTasks" && !modalIsMeal;
 
 
   // Get logged-in user from session
@@ -744,6 +748,7 @@ export default function HubSchedulePage() {
               original: name,
               status: json.status || "",
               description: json.description || "",
+              extraNotes: json.extraNotes || "",
               typeName: json.taskType?.name || "",
               typeColor: json.taskType?.color || "default",
             } as const;
@@ -761,12 +766,14 @@ export default function HubSchedulePage() {
             next[item.key] = {
               status: item.status,
               description: item.description,
+              extraNotes: item.extraNotes,
               typeName: item.typeName,
               typeColor: item.typeColor,
             };
             next[item.original] = {
               status: item.status,
               description: item.description,
+              extraNotes: item.extraNotes,
               typeName: item.typeName,
               typeColor: item.typeColor,
             };
@@ -1474,6 +1481,7 @@ export default function HubSchedulePage() {
       const metaPayload = {
         status: detail.status || "",
         description: detail.description || "",
+        extraNotes: detail.extraNotes || "",
         typeName: detail.taskType?.name,
         typeColor: detail.taskType?.color,
       };
@@ -1537,6 +1545,7 @@ export default function HubSchedulePage() {
       [taskName]: {
         status: newStatus,
         description: prev[taskName]?.description || "",
+        extraNotes: prev[taskName]?.extraNotes || "",
         typeName: prev[taskName]?.typeName,
         typeColor: prev[taskName]?.typeColor,
       },
@@ -1601,10 +1610,18 @@ async function handleTaskClick(taskPayload: TaskClickPayload) {
       "Team",
   };
 
+  const source = mergedPayload.taskSource ?? "schedule";
+
   setModalTask(mergedPayload);
   setModalDetails(null);
   setModalIsMeal(!!mergedPayload.isMeal);
+  setModalSource(source);
   setCommentDraft("");
+
+  if (source !== "myTasks") {
+    setModalLoading(false);
+    return;
+  }
 
   const baseTitle = taskBaseName(mergedPayload.task || "");
   if (!baseTitle) {
@@ -1630,6 +1647,7 @@ async function handleTaskClick(taskPayload: TaskClickPayload) {
     setModalTask(null);
     setModalDetails(null);
     setModalIsMeal(false);
+    setModalSource("schedule");
     setCommentDraft("");
     setAnimalOverlay(null);
     setAnimalLookupError(null);
@@ -1637,7 +1655,7 @@ async function handleTaskClick(taskPayload: TaskClickPayload) {
 
   // Auto-refresh task details while the modal is open
   useEffect(() => {
-    if (!modalTask || modalIsMeal) return undefined;
+    if (!modalTask || modalIsMeal || modalSource !== "myTasks") return undefined;
     const taskName = modalTask.task.split("\n")[0].trim();
     if (!taskName) return undefined;
 
@@ -1646,7 +1664,7 @@ async function handleTaskClick(taskPayload: TaskClickPayload) {
       15_000
     );
     return () => clearInterval(interval);
-  }, [modalIsMeal, modalTask]);
+  }, [modalIsMeal, modalSource, modalTask]);
 
   return (
     <>
@@ -1984,121 +2002,137 @@ async function handleTaskClick(taskPayload: TaskClickPayload) {
                   );
                 })()}
 
-              <div className="rounded-lg border border-[#e2d7b5] bg-white/70 px-4 py-3 space-y-3">
-                {modalTask.task.includes("\n") && (
-                  <div className="text-[11px] leading-snug text-[#44422f] bg-[#f1edd8] border border-[#dfd6b3] rounded-md px-3 py-2">
-                    {renderTextWithAnimalLinks(
-                      modalTask.task
-                        .split("\n")
-                        .slice(1)
-                        .join("\n")
-                        .trim() || "No additional notes."
-                    )}
-                  </div>
-                )}
-
-                <div className="space-y-1">
-                  <p className="text-[10px] uppercase tracking-[0.12em] text-[#8a8256]">
-                    Task description
-                  </p>
-                  {modalLoading ? (
-                    <p className="text-[11px] italic text-[#8e875d]">
-                      Loading task details…
-                    </p>
-                  ) : modalDetails?.description ? (
-                    <div className="text-[12px] leading-snug text-[#4f4b33]">
-                      {renderTextWithAnimalLinks(modalDetails.description)}
+              {showFullTaskDetail ? (
+                <div className="rounded-lg border border-[#e2d7b5] bg-white/70 px-4 py-3 space-y-3">
+                  {modalTask.task.includes("\n") && (
+                    <div className="text-[11px] leading-snug text-[#44422f] bg-[#f1edd8] border border-[#dfd6b3] rounded-md px-3 py-2">
+                      {renderTextWithAnimalLinks(
+                        modalTask.task
+                          .split("\n")
+                          .slice(1)
+                          .join("\n")
+                          .trim() || "No additional notes."
+                      )}
                     </div>
-                  ) : (
-                    <p className="text-[11px] italic text-[#a19a70]">
-                      No description found for this task.
-                    </p>
                   )}
-                </div>
 
-                {showFullTaskDetail && !modalLoading ? (
                   <div className="space-y-1">
                     <p className="text-[10px] uppercase tracking-[0.12em] text-[#8a8256]">
-                      Extra notes
+                      Task description
                     </p>
-                    {modalDetails?.extraNotes ? (
+                    {modalLoading ? (
+                      <p className="text-[11px] italic text-[#8e875d]">
+                        Loading task details…
+                      </p>
+                    ) : modalDetails?.description ? (
                       <div className="text-[12px] leading-snug text-[#4f4b33]">
-                        {renderTextWithAnimalLinks(modalDetails.extraNotes)}
+                        {renderTextWithAnimalLinks(modalDetails.description)}
                       </div>
                     ) : (
                       <p className="text-[11px] italic text-[#a19a70]">
-                        No extra notes shared yet.
+                        No description found for this task.
                       </p>
                     )}
                   </div>
-                ) : null}
 
-                {animalLookupError ? (
-                  <p className="text-[11px] text-red-700">{animalLookupError}</p>
-                ) : null}
-                {animalLoading && (
-                  <p className="text-[11px] text-[#7a7f54]">Loading animal details…</p>
-                )}
-
-                {showFullTaskDetail && !modalLoading && modalDetails?.estimatedTime ? (
-                  <div className="space-y-1">
-                    <p className="text-[10px] uppercase tracking-[0.12em] text-[#8a8256]">
-                      Estimated Time for Completion
-                    </p>
-                    <p className="text-[12px] font-semibold text-[#3e4c24]">
-                      {modalDetails.estimatedTime}
-                    </p>
-                  </div>
-                ) : null}
-
-                {showFullTaskDetail &&
-                !modalLoading &&
-                modalDetails?.links?.length ? (
-                  <div className="space-y-2">
-                    <p className="text-[10px] uppercase tracking-[0.12em] text-[#8a8256]">
-                      Relevant Links
-                    </p>
-                    <div className="flex flex-wrap gap-2">
-                      {modalDetails.links.map((link) => (
-                        <a
-                          key={`${link.url}-${link.label}`}
-                          href={link.url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="inline-flex items-center gap-1 rounded-full border border-[#cdd7ab] bg-white/80 px-3 py-1 text-[12px] font-semibold text-[#2f5ba0] underline underline-offset-2 hover:bg-[#f1edd8]"
-                        >
-                          {link.label || link.url}
-                        </a>
-                      ))}
+                  {!modalLoading ? (
+                    <div
+                      className={`space-y-1 rounded-md border px-3 py-2 ${
+                        modalDetails?.extraNotes
+                          ? "border-[#f1c38c] bg-[#fff4e5]"
+                          : "border-[#e2d7b5] bg-white/70"
+                      }`}
+                    >
+                      <p className="text-[10px] uppercase tracking-[0.12em] text-[#8a8256]">
+                        Extra notes
+                      </p>
+                      {modalDetails?.extraNotes ? (
+                        <div className="text-[12px] leading-snug text-[#4f4b33]">
+                          {renderTextWithAnimalLinks(modalDetails.extraNotes)}
+                        </div>
+                      ) : (
+                        <p className="text-[11px] italic text-[#a19a70]">
+                          No extra notes shared yet.
+                        </p>
+                      )}
                     </div>
-                  </div>
-                ) : null}
+                  ) : null}
 
-                <div className="text-[11px] text-[#666242]">
-                  {(() => {
-                    const me = modalTask.person.toLowerCase();
-                    const others = modalTask.groupNames.filter(
-                      (n) => n.toLowerCase() !== me
-                    );
+                  {animalLookupError ? (
+                    <p className="text-[11px] text-red-700">{animalLookupError}</p>
+                  ) : null}
+                  {animalLoading && (
+                    <p className="text-[11px] text-[#7a7f54]">Loading animal details…</p>
+                  )}
 
-                    if (others.length === 0) {
+                  {!modalLoading && modalDetails?.estimatedTime ? (
+                    <div className="space-y-1">
+                      <p className="text-[10px] uppercase tracking-[0.12em] text-[#8a8256]">
+                        Estimated Time for Completion
+                      </p>
+                      <p className="text-[12px] font-semibold text-[#3e4c24]">
+                        {modalDetails.estimatedTime}
+                      </p>
+                    </div>
+                  ) : null}
+
+                  {!modalLoading && modalDetails?.links?.length ? (
+                    <div className="space-y-2">
+                      <p className="text-[10px] uppercase tracking-[0.12em] text-[#8a8256]">
+                        Relevant Links
+                      </p>
+                      <div className="flex flex-wrap gap-2">
+                        {modalDetails.links.map((link) => (
+                          <a
+                            key={`${link.url}-${link.label}`}
+                            href={link.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-1 rounded-full border border-[#cdd7ab] bg-white/80 px-3 py-1 text-[12px] font-semibold text-[#2f5ba0] underline underline-offset-2 hover:bg-[#f1edd8]"
+                          >
+                            {link.label || link.url}
+                          </a>
+                        ))}
+                      </div>
+                    </div>
+                  ) : null}
+
+                  <div className="text-[11px] text-[#666242]">
+                    {(() => {
+                      const me = modalTask.person.toLowerCase();
+                      const others = modalTask.groupNames.filter(
+                        (n) => n.toLowerCase() !== me
+                      );
+
+                      if (others.length === 0) {
+                        return (
+                          <span>
+                            <span className="font-semibold">Assigned with:</span>{" "}
+                            (no one else – solo task)
+                          </span>
+                        );
+                      }
+
                       return (
                         <span>
                           <span className="font-semibold">Assigned with:</span>{" "}
-                          (no one else – solo task)
+                          {others.join(", ")}
                         </span>
                       );
-                    }
-
-                    return (
-                      <span>
-                        <span className="font-semibold">Assigned with:</span>{" "}
-                        {others.join(", ")}
-                      </span>
-                    );
-                  })()}
+                    })()}
+                  </div>
                 </div>
-              </div>
+              ) : (
+                <div className="rounded-lg border border-[#e2d7b5] bg-white/80 px-4 py-3">
+                  <p className="text-sm font-semibold text-[#3e4c24]">
+                    No set data for this task yet.
+                  </p>
+                  <p className="mt-1 text-xs text-[#6b6d4b]">
+                    Ask Jody or Yahali for more details about this task if you
+                    have questions.
+                  </p>
+                </div>
+              )}
 
               {showFullTaskDetail && (
                 <div className="rounded-lg border border-[#e2d7b5] bg-white/70 px-4 py-3 space-y-3">
@@ -2352,6 +2386,7 @@ async function handleTaskClick(taskPayload: TaskClickPayload) {
                             slot: slotForTask,
                             task: row.task,
                             groupNames: row.groupNames,
+                            taskSource: "report",
                           });
                         }}
                         className="text-left text-base font-semibold text-[#3e4c24] underline decoration-[#8fae4c] underline-offset-4"
@@ -3597,6 +3632,7 @@ function MyTasksList({
         const status = meta?.status || "";
         const description = meta?.description || "";
         const typeClass = typeColorClasses(meta?.typeColor);
+        const hasExtraNotes = Boolean(meta?.extraNotes);
 
         return (
           <button
@@ -3608,9 +3644,12 @@ function MyTasksList({
                 slot,
                 task,
                 groupNames,
+                taskSource: "myTasks",
               })
             }
-            className={`w-full rounded-lg border px-4 py-3 text-left shadow-sm hover:border-[#b8c98a] hover:shadow ${typeClass}`}
+            className={`w-full rounded-lg border px-4 py-3 text-left shadow-sm hover:border-[#b8c98a] hover:shadow ${typeClass} ${
+              hasExtraNotes ? "ring-2 ring-[#f2c188]" : ""
+            }`}
           >
             <div className="flex items-start justify-between gap-2">
               <div>
@@ -3623,6 +3662,11 @@ function MyTasksList({
                   <p className="mt-1 text-[12px] text-[#4f4b33] leading-snug">
                     {description}
                   </p>
+                )}
+                {hasExtraNotes && (
+                  <span className="mt-2 inline-flex items-center rounded-full bg-[#f8d9b5] px-2 py-[2px] text-[10px] font-semibold uppercase tracking-[0.12em] text-[#7a4305]">
+                    Extra notes
+                  </span>
                 )}
               </div>
               <StatusBadge
