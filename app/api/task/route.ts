@@ -160,10 +160,7 @@ async function findTaskPageByName(name: string) {
   });
 
   if (data.results?.length) return data.results[0];
-
-  // Fallback: return the first page if no exact match
-  const fallback = await queryDatabase(TASKS_DB_ID, { page_size: 1 });
-  return fallback.results?.[0] ?? null;
+  return null;
 }
 
 async function buildTaskPayload(page: any, fallbackName: string) {
