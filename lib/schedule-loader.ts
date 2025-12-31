@@ -590,7 +590,7 @@ export async function loadWeeklyScheduleData(
   const weekRows: WeeklyScheduleData["weekOverview"]["rows"] = [];
   const weekendRows: WeeklyScheduleData["weekendSchedule"]["rows"] = [];
 
-  pages.forEach((page) => {
+  pages.forEach((page: any) => {
     const rowName = getPlainText(page.properties?.[titlePropKey]).trim();
     if (!rowName) return;
 
