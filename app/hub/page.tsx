@@ -517,6 +517,7 @@ export default function HubSchedulePage() {
   const isVolunteer = normalizedUserType === "volunteer";
   const isAdmin = normalizedUserType === "admin";
   const showFullTaskDetail = modalSource === "myTasks" && !modalIsMeal;
+  const showTaskDetails = showFullTaskDetail && !modalDetails?.notFound;
 
 
   // Get logged-in user from session
@@ -1981,7 +1982,7 @@ async function handleTaskClick(taskPayload: TaskClickPayload) {
             </div>
 
             <div className="space-y-4">
-              {showFullTaskDetail &&
+              {showTaskDetails &&
                 (() => {
                   const fallbackMeta =
                     taskMetaMap[taskBaseName(modalTask.task)] || {};
@@ -2006,9 +2007,8 @@ async function handleTaskClick(taskPayload: TaskClickPayload) {
                   );
                 })()}
 
-              {showFullTaskDetail ? (
-                modalDetails?.notFound ? null : (
-                  <div className="rounded-lg border border-[#e2d7b5] bg-white/70 px-4 py-3 space-y-3">
+              {showTaskDetails ? (
+                <div className="rounded-lg border border-[#e2d7b5] bg-white/70 px-4 py-3 space-y-3">
                     {modalTask.task.includes("\n") && (
                       <div className="text-[11px] leading-snug text-[#44422f] bg-[#f1edd8] border border-[#dfd6b3] rounded-md px-3 py-2">
                         {renderTextWithAnimalLinks(
@@ -2135,8 +2135,7 @@ async function handleTaskClick(taskPayload: TaskClickPayload) {
                       })()}
                     </div>
                   </div>
-                )
-              ) : (
+              ) : modalSource !== "myTasks" ? (
                 <div className="rounded-lg border border-[#e2d7b5] bg-white/80 px-4 py-3">
                   <p className="text-sm font-semibold text-[#3e4c24]">
                     No set data for this task yet.
@@ -2146,9 +2145,9 @@ async function handleTaskClick(taskPayload: TaskClickPayload) {
                     have questions.
                   </p>
                 </div>
-              )}
+              ) : null}
 
-              {showFullTaskDetail && !modalDetails?.notFound && (
+              {showTaskDetails && (
                 <div className="rounded-lg border border-[#e2d7b5] bg-white/70 px-4 py-3 space-y-3">
                   <div>
                     <div className="flex items-center justify-between">
@@ -2211,7 +2210,7 @@ async function handleTaskClick(taskPayload: TaskClickPayload) {
                 </div>
               )}
 
-              {showFullTaskDetail && !modalDetails?.notFound && (
+              {showTaskDetails && (
                 <div className="rounded-lg border border-[#e2d7b5] bg-white/70 px-4 py-3 space-y-3">
                   <div className="flex items-center justify-between">
                     <div>
@@ -2291,7 +2290,7 @@ async function handleTaskClick(taskPayload: TaskClickPayload) {
                 </div>
               )}
 
-              {showFullTaskDetail && !modalDetails?.notFound && (
+              {showTaskDetails && (
                 <div className="rounded-lg border border-[#e2d7b5] bg-white/70 px-4 py-3 space-y-3">
                   <div className="flex items-center justify-between">
                     <div>
