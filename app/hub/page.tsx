@@ -86,6 +86,24 @@ type TaskDetails = {
 type TaskTypeOption = { name: string; color: string };
 type StatusOption = { name: string; color: string };
 
+type WeeklyScheduleResponse = {
+  weekLabel: string;
+  weekOverview: {
+    columns: string[];
+    rows: {
+      day: string;
+      assignments: Record<string, string[]>;
+    }[];
+  };
+  weekendSchedule: {
+    columns: string[];
+    rows: {
+      task: string;
+      assignments: Record<string, string[]>;
+    }[];
+  };
+};
+
 function splitCellTasks(cell: string): string[] {
   if (!cell.trim()) return [];
 
@@ -196,6 +214,8 @@ export default function HubSchedulePage() {
   const [animalOverlay, setAnimalOverlay] = useState<AnimalProfile | null>(null);
   const [animalLookupError, setAnimalLookupError] = useState<string | null>(null);
   const animalFetchInFlight = useRef(false);
+  const [weeklySchedule, setWeeklySchedule] = useState<WeeklyScheduleResponse | null>(null);
+  const [weeklyLoading, setWeeklyLoading] = useState(false);
   const [reportOpen, setReportOpen] = useState(false);
   const [reportStatus, setReportStatus] = useState<Record<string, string>>({});
   const [reportComments, setReportComments] = useState<Record<string, string>>({});
@@ -267,6 +287,40 @@ export default function HubSchedulePage() {
 
     setWeekDays(nextWeekDays);
   }, [formatDateLabel, scheduleDateObj]);
+
+  const mondayDateLabel = useMemo(
+    () => (weekDays.length ? weekDays[0]?.dateLabel : undefined),
+    [weekDays]
+  );
+
+  useEffect(() => {
+    if (!mondayDateLabel) return;
+    let cancelled = false;
+
+    const loadWeekly = async () => {
+      setWeeklyLoading(true);
+      try {
+        const res = await fetch(
+          `/api/schedule/weekly?date=${encodeURIComponent(mondayDateLabel)}`,
+          { cache: "no-store" }
+        );
+        const json = await res.json();
+        if (!cancelled && res.ok) {
+          setWeeklySchedule(json as WeeklyScheduleResponse);
+        }
+      } catch (err) {
+        console.error("Failed to load weekly schedule", err);
+        if (!cancelled) setWeeklySchedule(null);
+      } finally {
+        if (!cancelled) setWeeklyLoading(false);
+      }
+    };
+
+    loadWeekly();
+    return () => {
+      cancelled = true;
+    };
+  }, [mondayDateLabel]);
 
   useEffect(() => {
     if (!scheduleDateLabel || !data) return;
@@ -842,54 +896,9 @@ export default function HubSchedulePage() {
 
   const scheduleDataToRender = scheduleDataForView || data;
 
-  const eveningSlots = useMemo(
-    () =>
-      workSlots.filter(
-        (slot) => /evening/i.test(slot.label) && !/weekend/i.test(slot.label)
-      ),
-    [workSlots]
-  );
-
-  const weekendDays = useMemo(
-    () =>
-      weekDays.filter((entry) => /saturday|sunday/i.test(entry.day)),
-    [weekDays]
-  );
-
   type ShiftTaskCell = {
     slot: Slot;
     tasks: { task: string; people: string[] }[];
-  };
-
-  type EveningDayRow = {
-    day: string;
-    breakfastDishes: string[];
-    lunchDishes: string[];
-    condoCleaning: string[];
-    eveningShift: string[];
-    isActiveDay: boolean;
-  };
-
-  type EveningIndexTask = {
-    task: string;
-    slot: Slot;
-    people: string[];
-  };
-
-  type WeekendDaySummary = {
-    day: string;
-    dateLabel: string;
-    weekendAm: string[];
-    weekendPm: string[];
-    isActiveDay: boolean;
-  };
-
-  type WeekendIndexTask = {
-    task: string;
-    slot: Slot;
-    people: string[];
-    day: string;
-    dateLabel: string;
   };
 
   const shiftTaskAssignments = useCallback(
@@ -947,343 +956,35 @@ export default function HubSchedulePage() {
   );
 
 
-  const weekendScheduleSummary = useMemo(() => {
-    if (!data || weekendDays.length === 0) {
-      return {
-        dayRows: [] as WeekendDaySummary[],
-        indexTasks: [] as WeekendIndexTask[],
-      };
-    }
-
-    const sortNames = (names: string[]) => {
-      const unique = Array.from(new Set(names.filter(Boolean)));
-      if (!currentUserName) return unique;
-      const normalizedUser = currentUserName.toLowerCase();
-      const meIndex = unique.findIndex(
-        (name) => name.toLowerCase() === normalizedUser
-      );
-      if (meIndex === -1) return unique;
-      return [unique[meIndex], ...unique.filter((_, idx) => idx !== meIndex)];
-    };
-
-    const collectShiftPeople = (
-      schedule: ScheduleResponse | null,
-      filterFn: (slot: Slot) => boolean
-    ) => {
-      if (!schedule) return [] as string[];
-      const slotIndices = schedule.slots
-        .filter(filterFn)
-        .map((slot) => schedule.slots.findIndex((s) => s.id === slot.id))
-        .filter((idx) => idx !== -1);
-
-      if (slotIndices.length === 0) return [];
-
-      const people = schedule.people.filter((_, rowIdx) =>
-        slotIndices.some((idx) => {
-          const cell = (schedule.cells[rowIdx]?.[idx] ?? "").trim();
-          return splitCellTasks(cell).length > 0;
-        })
-      );
-
-      return sortNames(people);
-    };
-
-    const isWeekendAmSlot = (slot: Slot) =>
-      /weekend/i.test(slot.label) && /am|morning/i.test(slot.label);
-
-    const isWeekendPmSlot = (slot: Slot) =>
-      /weekend/i.test(slot.label) && /pm|afternoon|evening/i.test(slot.label);
-
-    const dayRows = weekendDays.map(({ day, dateLabel }) => {
-      const schedule =
-        dateLabel === scheduleDateLabel
-          ? data
-          : weekSchedules[dateLabel] || null;
-      return {
-        day,
-        dateLabel,
-        weekendAm: collectShiftPeople(schedule, isWeekendAmSlot),
-        weekendPm: collectShiftPeople(schedule, isWeekendPmSlot),
-        isActiveDay: scheduleDayName?.toLowerCase() === day.toLowerCase(),
-      };
-    });
-
-    const indexMap = new Map<
-      string,
-      { task: string; slot: Slot; people: Set<string>; day: string; dateLabel: string }
-    >();
-
-    weekendDays.forEach(({ day, dateLabel }) => {
-      const schedule =
-        dateLabel === scheduleDateLabel
-          ? data
-          : weekSchedules[dateLabel] || null;
-      if (!schedule) return;
-
-      schedule.slots.forEach((slot, slotIdx) => {
-        schedule.people.forEach((person, rowIdx) => {
-          const cell = (schedule.cells[rowIdx]?.[slotIdx] ?? "").trim();
-          if (!cell) return;
-          splitCellTasks(cell).forEach((task) => {
-            const base = taskBaseName(task);
-            if (!base) return;
-            const key = `${dateLabel}-${slot.id}-${base.toLowerCase()}`;
-            if (!indexMap.has(key)) {
-              indexMap.set(key, {
-                task: base,
-                slot,
-                people: new Set(),
-                day,
-                dateLabel,
-              });
-            }
-            indexMap.get(key)?.people.add(person);
-          });
-        });
-      });
-    });
-
-    const indexTasks = Array.from(indexMap.values())
-      .map((entry) => ({
-        task: entry.task,
-        slot: entry.slot,
-        people: Array.from(entry.people),
-        day: entry.day,
-        dateLabel: entry.dateLabel,
-      }))
-      .sort((a, b) => {
-        if (a.dateLabel !== b.dateLabel) {
-          return a.dateLabel.localeCompare(b.dateLabel);
-        }
-        if (a.slot.label !== b.slot.label) {
-          return a.slot.label.localeCompare(b.slot.label);
-        }
-        return a.task.localeCompare(b.task);
-      });
-
-    return { dayRows, indexTasks };
-  }, [
-    currentUserName,
-    data,
-    scheduleDateLabel,
-    scheduleDayName,
-    weekSchedules,
-    weekendDays,
-  ]);
-
-  const eveningScheduleSummary = useMemo(() => {
-    const baseRows: EveningDayRow[] = (weekDays.length
-      ? weekDays.map((entry) => entry.day)
-      : [
-          "Monday",
-          "Tuesday",
-          "Wednesday",
-          "Thursday",
-          "Friday",
-          "Saturday",
-          "Sunday",
-        ]
-    ).map((day) => ({
-      day,
-      breakfastDishes: [],
-      lunchDishes: [],
-      condoCleaning: [],
-      eveningShift: [],
-      isActiveDay: scheduleDayName?.toLowerCase() === day.toLowerCase(),
+  const weekOverviewRows = useMemo(() => {
+    if (!weeklySchedule) return [];
+    return weeklySchedule.weekOverview.rows.map((row) => ({
+      ...row,
+      isActiveDay: scheduleDayName?.toLowerCase() === row.day.toLowerCase(),
     }));
+  }, [scheduleDayName, weeklySchedule]);
 
-    const sortNames = (names: string[]) => {
-      const unique = Array.from(new Set(names.filter(Boolean)));
-      if (!currentUserName) return unique;
-      const normalizedUser = currentUserName.toLowerCase();
-      const meIndex = unique.findIndex(
-        (name) => name.toLowerCase() === normalizedUser
-      );
-      if (meIndex === -1) return unique;
-      return [unique[meIndex], ...unique.filter((_, idx) => idx !== meIndex)];
-    };
+  const weekendRows = useMemo(
+    () => weeklySchedule?.weekendSchedule.rows ?? [],
+    [weeklySchedule]
+  );
 
-    const collectAssignments = (schedule: ScheduleResponse | null) => {
-      if (!schedule) {
-        return {
-          breakfast: [] as string[],
-          lunch: [] as string[],
-          condo: [] as string[],
-          evening: [] as string[],
-        };
-      }
-
-      const slotIndices = schedule.slots
-        .filter(
-          (slot) =>
-            /evening/i.test(slot.label) &&
-            !/weekend/i.test(slot.label) &&
-            !slot.isMeal
-        )
-        .map((slot) => schedule.slots.findIndex((s) => s.id === slot.id))
-        .filter((idx) => idx !== -1);
-
-      const breakfastSlotIndices = schedule.slots
-        .filter((slot) => slot.isMeal && /breakfast/i.test(slot.label))
-        .map((slot) => schedule.slots.findIndex((s) => s.id === slot.id))
-        .filter((idx) => idx !== -1);
-
-      const lunchSlotIndices = schedule.slots
-        .filter((slot) => slot.isMeal && /lunch/i.test(slot.label))
-        .map((slot) => schedule.slots.findIndex((s) => s.id === slot.id))
-        .filter((idx) => idx !== -1);
-
-      const condo = new Set<string>();
-      const evening = new Set<string>();
-      const breakfast = new Set<string>();
-      const lunch = new Set<string>();
-
-      const isDishesTask = (task: string) =>
-        /dishes?/i.test(taskBaseName(task));
-
-      schedule.people.forEach((person, rowIdx) => {
-        let hasNonCondo = false;
-        let hasCondo = false;
-        let hasBreakfastDishes = false;
-        let hasLunchDishes = false;
-
-        slotIndices.forEach((idx) => {
-          const cell = (schedule.cells[rowIdx]?.[idx] ?? "").trim();
-          if (!cell) return;
-          const tasks = splitCellTasks(cell);
-          tasks.forEach((task) => {
-            const base = taskBaseName(task);
-            if (!base) return;
-            if (/condo cleaning/i.test(base)) {
-              hasCondo = true;
-            } else {
-              hasNonCondo = true;
-            }
-          });
-        });
-
-        breakfastSlotIndices.forEach((idx) => {
-          const cell = (schedule.cells[rowIdx]?.[idx] ?? "").trim();
-          if (!cell) return;
-          const tasks = splitCellTasks(cell);
-          if (tasks.some((task) => isDishesTask(task))) {
-            hasBreakfastDishes = true;
-          }
-        });
-
-        lunchSlotIndices.forEach((idx) => {
-          const cell = (schedule.cells[rowIdx]?.[idx] ?? "").trim();
-          if (!cell) return;
-          const tasks = splitCellTasks(cell);
-          if (tasks.some((task) => isDishesTask(task))) {
-            hasLunchDishes = true;
-          }
-        });
-
-        if (hasCondo) condo.add(person);
-        if (hasNonCondo) evening.add(person);
-        if (hasBreakfastDishes) breakfast.add(person);
-        if (hasLunchDishes) lunch.add(person);
-      });
-
-      return {
-        breakfast: sortNames(Array.from(breakfast)),
-        lunch: sortNames(Array.from(lunch)),
-        condo: sortNames(Array.from(condo)),
-        evening: sortNames(Array.from(evening)),
-      };
-    };
-
-    const dayRows = baseRows.map((row) => {
-      const dayEntry = weekDays.find(
-        (entry) => entry.day.toLowerCase() === row.day.toLowerCase()
-      );
-      const schedule =
-        dayEntry?.dateLabel && weekSchedules[dayEntry.dateLabel]
-          ? weekSchedules[dayEntry.dateLabel]
-          : row.isActiveDay
-            ? data
-            : null;
-      const { breakfast, lunch, condo, evening } = collectAssignments(
-        schedule || null
-      );
-      return {
-        ...row,
-        breakfastDishes: breakfast,
-        lunchDishes: lunch,
-        condoCleaning: condo,
-        eveningShift: evening,
-      };
-    });
-
-    const indexMap = new Map<
-      string,
-      { task: string; slot: Slot; people: Set<string> }
-    >();
-
-    if (data) {
-      const eveningIndices = eveningSlots
-        .map((slot) => ({
-          slot,
-          idx: data.slots.findIndex((s) => s.id === slot.id),
-        }))
-        .filter((entry) => entry.idx !== -1);
-
-      data.people.forEach((person, rowIdx) => {
-        eveningIndices.forEach(({ slot, idx }) => {
-          const cell = (data.cells[rowIdx]?.[idx] ?? "").trim();
-          if (!cell) return;
-          splitCellTasks(cell).forEach((task) => {
-            const base = taskBaseName(task);
-            if (!base) return;
-            const key = base.toLowerCase();
-            if (!indexMap.has(key)) {
-              indexMap.set(key, { task: base, slot, people: new Set() });
-            }
-            indexMap.get(key)?.people.add(person);
-          });
-        });
-      });
-    }
-
-    const indexTasks = Array.from(indexMap.values())
-      .filter((entry) => entry.people.size > 1)
-      .filter((entry) => !/condo cleaning/i.test(entry.task))
-      .map((entry) => ({
-        task: entry.task,
-        slot: entry.slot,
-        people: Array.from(entry.people),
-      }))
-      .sort((a, b) => a.task.localeCompare(b.task));
-
-    return { dayRows, indexTasks };
-  }, [
-    currentUserName,
-    data,
-    eveningSlots,
-    scheduleDayName,
-    weekDays,
-    weekSchedules,
-  ]);
-
-  const eveningHasContent =
-    eveningScheduleSummary.dayRows.some(
-      (row) =>
-        row.breakfastDishes.length > 0 ||
-        row.lunchDishes.length > 0 ||
-        row.condoCleaning.length > 0 ||
-        row.eveningShift.length > 0
-    ) || eveningScheduleSummary.indexTasks.length > 0;
-  const weekendHasContent =
-    weekendScheduleSummary.dayRows.some(
-      (row) => row.weekendAm.length > 0 || row.weekendPm.length > 0
-    ) ||
-    weekendScheduleSummary.indexTasks.length > 0;
+  const weekOverviewHasContent = weekOverviewRows.some((row) =>
+    weeklySchedule?.weekOverview.columns.some(
+      (col) => row.assignments[col]?.length
+    )
+  );
+  const weekendHasContent = weekendRows.some((row) =>
+    weeklySchedule?.weekendSchedule.columns.some(
+      (col) => row.assignments[col]?.length
+    )
+  );
 
   const showEveningSection =
-    !isExternalVolunteer && (isVolunteer || isAdmin || eveningHasContent);
+    !isExternalVolunteer &&
+    (isVolunteer || isAdmin || weekOverviewHasContent || weeklyLoading);
   const showWeekendSection =
-    isVolunteer || isAdmin || isExternalVolunteer || weekendHasContent;
+    isVolunteer || isAdmin || isExternalVolunteer || weekendHasContent || weeklyLoading;
 
   const myTasks = useMemo(() => {
     if (!data || !currentUserName) return [] as {
@@ -1908,15 +1609,13 @@ async function handleTaskClick(taskPayload: TaskClickPayload) {
           !error &&
           data &&
           showEveningSection && (
-            <EveningScheduleTable
+            <WeekOverviewTable
               title="Week Overview"
-              description="Weekday coverage for meals, condo cleaning, and evening shifts with shared task rollups."
-              dayRows={eveningScheduleSummary.dayRows}
-              indexTasks={eveningScheduleSummary.indexTasks}
-              onTaskClick={handleTaskClick}
-              taskMetaMap={taskMetaMap}
-              statusColors={statusColorLookup}
+              description="Weekly coverage grouped by day and assignment columns from the schedule."
+              columns={weeklySchedule?.weekOverview.columns || []}
+              rows={weekOverviewRows}
               currentUserName={currentUserName}
+              loading={weeklyLoading}
             />
           )}
 
@@ -1926,12 +1625,10 @@ async function handleTaskClick(taskPayload: TaskClickPayload) {
           showWeekendSection && (
             <WeekendScheduleTable
               title="Weekend Schedule"
-              description="Upcoming Saturday and Sunday coverage with assigned teammates and a task bank."
-              dayRows={weekendScheduleSummary.dayRows}
-              indexTasks={weekendScheduleSummary.indexTasks}
+              description="Saturday and Sunday assignments grouped by task and time of day."
+              columns={weeklySchedule?.weekendSchedule.columns || []}
+              rows={weekendRows}
               onTaskClick={handleTaskClick}
-              taskMetaMap={taskMetaMap}
-              statusColors={statusColorLookup}
               currentUserName={currentUserName}
             />
           )}
@@ -3138,31 +2835,24 @@ function ShiftTaskTable({
   );
 }
 
-function EveningScheduleTable({
+function WeekOverviewTable({
   title,
   description,
-  dayRows,
-  indexTasks,
-  onTaskClick,
-  taskMetaMap,
-  statusColors,
+  columns,
+  rows,
   currentUserName,
+  loading,
 }: {
   title: string;
   description: string;
-  dayRows: {
+  columns: string[];
+  rows: {
     day: string;
-    breakfastDishes: string[];
-    lunchDishes: string[];
-    condoCleaning: string[];
-    eveningShift: string[];
+    assignments: Record<string, string[]>;
     isActiveDay: boolean;
   }[];
-  indexTasks: { task: string; slot: Slot; people: string[] }[];
-  onTaskClick?: (payload: TaskClickPayload) => void;
-  taskMetaMap: Record<string, TaskMeta>;
-  statusColors: Record<string, string>;
   currentUserName?: string | null;
+  loading?: boolean;
 }) {
   const normalizedUser = (currentUserName || "").toLowerCase().trim();
 
@@ -3214,150 +2904,57 @@ function EveningScheduleTable({
           <thead className="bg-[#f4f1df] text-[11px] uppercase tracking-[0.14em] text-[#6b6f4c]">
             <tr>
               <th className="px-4 py-3 border-b border-[#e2d7b5]">Day</th>
-              <th className="px-4 py-3 border-b border-[#e2d7b5]">
-                Breakfast dishes
-              </th>
-              <th className="px-4 py-3 border-b border-[#e2d7b5]">
-                Lunch dishes
-              </th>
-              <th className="px-4 py-3 border-b border-[#e2d7b5]">
-                Condo Cleaning
-              </th>
-              <th className="px-4 py-3 border-b border-[#e2d7b5]">
-                Evening shift
-              </th>
+              {columns.map((column) => (
+                <th
+                  key={column}
+                  className="px-4 py-3 border-b border-[#e2d7b5]"
+                >
+                  {column}
+                </th>
+              ))}
             </tr>
           </thead>
           <tbody>
-            {dayRows.map((row) => {
-              const condoHasUser = normalizedUser
-                ? row.condoCleaning.some((p) => p.toLowerCase() === normalizedUser)
-                : false;
-              const eveningHasUser = normalizedUser
-                ? row.eveningShift.some((p) => p.toLowerCase() === normalizedUser)
-                : false;
-              const breakfastHasUser = normalizedUser
-                ? row.breakfastDishes.some(
-                    (p) => p.toLowerCase() === normalizedUser
-                  )
-                : false;
-              const lunchHasUser = normalizedUser
-                ? row.lunchDishes.some(
-                    (p) => p.toLowerCase() === normalizedUser
-                  )
-                : false;
-
-              return (
-                <tr
-                  key={row.day}
-                  className={row.isActiveDay ? "bg-[#f9f6e7]" : ""}
-                >
-                  <td className="px-4 py-3 border-b border-[#eee6c8] font-semibold text-[#3e4c24]">
-                    {row.day}
-                  </td>
-                  <td
-                    className={`px-4 py-3 border-b border-[#eee6c8] ${
-                      breakfastHasUser ? "ring-2 ring-[#d2e4a0] ring-inset" : ""
-                    }`}
-                  >
-                    {renderNames(row.breakfastDishes)}
-                  </td>
-                  <td
-                    className={`px-4 py-3 border-b border-[#eee6c8] ${
-                      lunchHasUser ? "ring-2 ring-[#d2e4a0] ring-inset" : ""
-                    }`}
-                  >
-                    {renderNames(row.lunchDishes)}
-                  </td>
-                  <td
-                    className={`px-4 py-3 border-b border-[#eee6c8] ${
-                      condoHasUser ? "ring-2 ring-[#d2e4a0] ring-inset" : ""
-                    }`}
-                  >
-                    {renderNames(row.condoCleaning)}
-                  </td>
-                  <td
-                    className={`px-4 py-3 border-b border-[#eee6c8] ${
-                      eveningHasUser ? "ring-2 ring-[#d2e4a0] ring-inset" : ""
-                    }`}
-                  >
-                    {renderNames(row.eveningShift)}
-                  </td>
-                </tr>
-              );
-            })}
+            {rows.map((row) => (
+              <tr
+                key={row.day}
+                className={row.isActiveDay ? "bg-[#f9f6e7]" : ""}
+              >
+                <td className="px-4 py-3 border-b border-[#eee6c8] font-semibold text-[#3e4c24]">
+                  {row.day}
+                </td>
+                {columns.map((column) => {
+                  const names = row.assignments[column] || [];
+                  const hasUser = normalizedUser
+                    ? names.some(
+                        (person) => person.toLowerCase() === normalizedUser
+                      )
+                    : false;
+                  return (
+                    <td
+                      key={`${row.day}-${column}`}
+                      className={`px-4 py-3 border-b border-[#eee6c8] align-top ${
+                        hasUser ? "ring-2 ring-[#d2e4a0] ring-inset" : ""
+                      }`}
+                    >
+                      {renderNames(names)}
+                    </td>
+                  );
+                })}
+              </tr>
+            ))}
           </tbody>
         </table>
       </div>
 
-      <div className="space-y-2">
-        <div className="flex items-center justify-between">
-          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[#5d7f3b]">
-            Evening shift tasks
-          </p>
-        </div>
-        {indexTasks.length === 0 ? (
-          <p className="text-sm text-[#7a7f54] italic">
-            No shared evening shift tasks listed yet.
-          </p>
-        ) : (
-          <div className="grid gap-3 md:grid-cols-2">
-            {indexTasks.map((entry) => {
-              const participants = entry.people;
-              const includesUser = normalizedUser
-                ? participants.some((p) => p.toLowerCase() === normalizedUser)
-                : false;
-              const meta = taskMetaMap[taskBaseName(entry.task)];
-              const status = meta?.status;
-              const typeClass = typeColorClasses(meta?.typeColor);
-              const primaryPerson = includesUser
-                ? currentUserName || participants[0] || "Team"
-                : participants[0] || currentUserName || "Team";
-
-              return (
-                <button
-                  key={`${entry.slot.id}-${entry.task}`}
-                  type="button"
-                  onClick={() =>
-                    onTaskClick?.({
-                      person: primaryPerson,
-                      slot: entry.slot,
-                      task: entry.task,
-                      groupNames: participants,
-                    })
-                  }
-                  className={`w-full rounded-md border px-3 py-2 text-left shadow-sm transition hover:shadow ${typeClass} ${
-                    includesUser ? "ring-2 ring-[#d2e4a0]" : ""
-                  }`}
-                >
-                  <div className="flex items-start justify-between gap-2">
-                    <div>
-                      <div className="font-semibold text-[#42502d]">
-                        {entry.task}
-                      </div>
-                      <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-[#7a7f54]">
-                        <span className="rounded-full bg-white/80 px-2 py-[2px] text-[10px] font-semibold uppercase tracking-[0.12em] text-[#4f5730]">
-                          {participants.length}{" "}
-                          {participants.length === 1 ? "person" : "people"}
-                        </span>
-                        {includesUser && (
-                          <span className="inline-flex items-center rounded-full bg-[#f1edd8] px-2 py-[1px] text-[10px] font-semibold text-[#4f4b33]">
-                            You&apos;re on this task
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                    <StatusBadge
-                      status={status}
-                      color={statusColors[status || ""]}
-                    />
-                  </div>
-                </button>
-              );
-            })}
-          </div>
-        )}
-      </div>
+      {!loading && rows.length === 0 && (
+        <p className="text-sm text-[#7a7f54] italic">
+          No weekly overview assignments listed yet.
+        </p>
+      )}
+      {loading && (
+        <p className="text-sm text-[#7a7f54] italic">Loading weekly overview…</p>
+      )}
     </section>
   );
 }
@@ -3365,32 +2962,19 @@ function EveningScheduleTable({
 function WeekendScheduleTable({
   title,
   description,
-  dayRows,
-  indexTasks,
+  columns,
+  rows,
   onTaskClick,
-  taskMetaMap,
-  statusColors,
   currentUserName,
 }: {
   title: string;
   description: string;
-  dayRows: {
-    day: string;
-    dateLabel: string;
-    weekendAm: string[];
-    weekendPm: string[];
-    isActiveDay: boolean;
-  }[];
-  indexTasks: {
+  columns: string[];
+  rows: {
     task: string;
-    slot: Slot;
-    people: string[];
-    day: string;
-    dateLabel: string;
+    assignments: Record<string, string[]>;
   }[];
   onTaskClick?: (payload: TaskClickPayload) => void;
-  taskMetaMap: Record<string, TaskMeta>;
-  statusColors: Record<string, string>;
   currentUserName?: string | null;
 }) {
   const normalizedUser = (currentUserName || "").toLowerCase().trim();
@@ -3442,141 +3026,96 @@ function WeekendScheduleTable({
         <table className="w-full min-w-[640px] border-collapse text-left text-sm text-[#4f5730]">
           <thead className="bg-[#f4f1df] text-[11px] uppercase tracking-[0.14em] text-[#6b6f4c]">
             <tr>
-              <th className="px-4 py-3 border-b border-[#e2d7b5]">Day</th>
-              <th className="px-4 py-3 border-b border-[#e2d7b5]">
-                Weekend AM
-              </th>
-              <th className="px-4 py-3 border-b border-[#e2d7b5]">
-                Weekend PM
-              </th>
+              <th className="px-4 py-3 border-b border-[#e2d7b5]">Task</th>
+              {columns.map((column) => (
+                <th
+                  key={column}
+                  className="px-4 py-3 border-b border-[#e2d7b5]"
+                >
+                  {column}
+                </th>
+              ))}
             </tr>
           </thead>
           <tbody>
-            {dayRows.map((row) => {
-              const amHasUser = normalizedUser
-                ? row.weekendAm.some(
-                    (person) => person.toLowerCase() === normalizedUser
-                  )
-                : false;
-              const pmHasUser = normalizedUser
-                ? row.weekendPm.some(
+            {rows.map((row) => {
+              const allPeople = Array.from(
+                new Set(
+                  columns.flatMap((column) => row.assignments[column] || [])
+                )
+              );
+              const hasUser = normalizedUser
+                ? allPeople.some(
                     (person) => person.toLowerCase() === normalizedUser
                   )
                 : false;
 
+              const slot: Slot = {
+                id: `weekend-${row.task}`,
+                label: "Weekend Schedule",
+                timeRange: "",
+                isMeal: false,
+              };
+
               return (
-                <tr
-                  key={`${row.dateLabel}-${row.day}`}
-                  className={row.isActiveDay ? "bg-[#f9f6e7]" : ""}
-                >
-                  <td className="px-4 py-3 border-b border-[#eee6c8] font-semibold text-[#3e4c24]">
-                    <div>{row.day}</div>
-                    <div className="text-[11px] text-[#8a8256]">
-                      {row.dateLabel}
-                    </div>
+                <tr key={row.task}>
+                  <td className="px-4 py-3 border-b border-[#eee6c8] align-top">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        onTaskClick?.({
+                          person:
+                            currentUserName || allPeople[0] || "Team",
+                          slot,
+                          task: row.task,
+                          groupNames: allPeople,
+                          taskSource: "schedule",
+                        })
+                      }
+                      className={`w-full rounded-md border px-3 py-2 text-left font-semibold text-[#3e4c24] shadow-sm transition hover:shadow ${
+                        hasUser ? "ring-2 ring-[#d2e4a0]" : ""
+                      }`}
+                    >
+                      <div>{row.task}</div>
+                      <div className="mt-1 text-[10px] uppercase tracking-[0.12em] text-[#7a7f54]">
+                        {allPeople.length}{" "}
+                        {allPeople.length === 1 ? "person" : "people"}
+                      </div>
+                    </button>
                   </td>
-                  <td
-                    className={`px-4 py-3 border-b border-[#eee6c8] align-top ${
-                      amHasUser ? "ring-2 ring-[#d2e4a0] ring-inset" : ""
-                    }`}
-                  >
-                    <div className="max-h-36 overflow-y-auto">
-                      {renderNames(row.weekendAm)}
-                    </div>
-                  </td>
-                  <td
-                    className={`px-4 py-3 border-b border-[#eee6c8] align-top ${
-                      pmHasUser ? "ring-2 ring-[#d2e4a0] ring-inset" : ""
-                    }`}
-                  >
-                    <div className="max-h-36 overflow-y-auto">
-                      {renderNames(row.weekendPm)}
-                    </div>
-                  </td>
+                  {columns.map((column) => {
+                    const names = row.assignments[column] || [];
+                    const columnHasUser = normalizedUser
+                      ? names.some(
+                          (person) => person.toLowerCase() === normalizedUser
+                        )
+                      : false;
+                    return (
+                      <td
+                        key={`${row.task}-${column}`}
+                        className={`px-4 py-3 border-b border-[#eee6c8] align-top ${
+                          columnHasUser
+                            ? "ring-2 ring-[#d2e4a0] ring-inset"
+                            : ""
+                        }`}
+                      >
+                        <div className="max-h-36 overflow-y-auto">
+                          {renderNames(names)}
+                        </div>
+                      </td>
+                    );
+                  })}
                 </tr>
               );
             })}
           </tbody>
         </table>
       </div>
-
-      <div className="space-y-2">
-        <div className="flex items-center justify-between">
-          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[#5d7f3b]">
-            Weekend task bank
-          </p>
-        </div>
-        {indexTasks.length === 0 ? (
-          <p className="text-sm text-[#7a7f54] italic">
-            No weekend tasks listed yet.
-          </p>
-        ) : (
-          <div className="max-h-[420px] overflow-y-auto pr-1">
-            <div className="grid gap-3 md:grid-cols-2">
-              {indexTasks.map((entry) => {
-              const participants = entry.people;
-              const includesUser = normalizedUser
-                ? participants.some((p) => p.toLowerCase() === normalizedUser)
-                : false;
-              const meta = taskMetaMap[taskBaseName(entry.task)];
-              const status = meta?.status;
-              const typeClass = typeColorClasses(meta?.typeColor);
-              const primaryPerson = includesUser
-                ? currentUserName || participants[0] || "Team"
-                : participants[0] || currentUserName || "Team";
-
-              return (
-                <button
-                  key={`${entry.dateLabel}-${entry.slot.id}-${entry.task}`}
-                  type="button"
-                  onClick={() =>
-                    onTaskClick?.({
-                      person: primaryPerson,
-                      slot: entry.slot,
-                      task: entry.task,
-                      groupNames: participants,
-                    })
-                  }
-                  className={`w-full rounded-md border px-3 py-2 text-left shadow-sm transition hover:shadow ${typeClass} ${
-                    includesUser ? "ring-2 ring-[#d2e4a0]" : ""
-                  }`}
-                >
-                  <div className="flex items-start justify-between gap-2">
-                    <div>
-                      <div className="text-[10px] uppercase tracking-[0.12em] text-[#7a7f54]">
-                        {entry.day} • {entry.dateLabel}
-                      </div>
-                      <div className="font-semibold text-[#42502d]">
-                        {entry.task}
-                      </div>
-                      <div className="text-[11px] text-[#7a7f54]">
-                        {entry.slot.label}
-                        {entry.slot.timeRange ? ` • ${entry.slot.timeRange}` : ""}
-                      </div>
-                      <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-[#7a7f54]">
-                        <span className="rounded-full bg-white/80 px-2 py-[2px] text-[10px] font-semibold uppercase tracking-[0.12em] text-[#4f5730]">
-                          {participants.length}{" "}
-                          {participants.length === 1 ? "person" : "people"}
-                        </span>
-                        {includesUser && (
-                          <span className="inline-flex items-center rounded-full bg-[#f1edd8] px-2 py-[1px] text-[10px] font-semibold text-[#4f4b33]">
-                            You&apos;re on this task
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                    <StatusBadge
-                      status={status}
-                      color={statusColors[status || ""]}
-                    />
-                  </div>
-                </button>
-              );
-            })}
-            </div>
-          </div>
-        )}
-      </div>
+      {rows.length === 0 && (
+        <p className="text-sm text-[#7a7f54] italic">
+          No weekend tasks listed yet.
+        </p>
+      )}
     </section>
   );
 }
