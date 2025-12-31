@@ -75,6 +75,7 @@ type TaskDetails = {
   description: string;
   extraNotes?: string;
   status: string;
+  notFound?: boolean;
   comments: TaskComment[];
   media: { name: string; url: string; kind: "image" | "video" | "audio" | "file" }[];
   links?: { label: string; url: string }[];
@@ -1497,6 +1498,7 @@ export default function HubSchedulePage() {
       description: "",
       extraNotes: "",
       status: "",
+      notFound: false,
       comments: [],
       media: [],
       links: [],
@@ -1507,7 +1509,7 @@ export default function HubSchedulePage() {
     try {
       const res = await fetch(`/api/task?name=${encodeURIComponent(taskName)}`);
       if (!res.ok) {
-        applyDetails(emptyDetails);
+        applyDetails({ ...emptyDetails, notFound: true });
         return;
       }
 
@@ -1517,6 +1519,7 @@ export default function HubSchedulePage() {
         description: json.description || "",
         extraNotes: json.extraNotes || "",
         status: json.status || "",
+        notFound: false,
         comments: json.comments || [],
         media: json.media || json.photos || [],
         links: json.links || [],
@@ -1630,6 +1633,7 @@ async function handleTaskClick(taskPayload: TaskClickPayload) {
       description: "",
       extraNotes: "",
       status: "",
+      notFound: true,
       comments: [],
       media: [],
       links: [],
@@ -2003,125 +2007,135 @@ async function handleTaskClick(taskPayload: TaskClickPayload) {
                 })()}
 
               {showFullTaskDetail ? (
-                <div className="rounded-lg border border-[#e2d7b5] bg-white/70 px-4 py-3 space-y-3">
-                  {modalTask.task.includes("\n") && (
-                    <div className="text-[11px] leading-snug text-[#44422f] bg-[#f1edd8] border border-[#dfd6b3] rounded-md px-3 py-2">
-                      {renderTextWithAnimalLinks(
-                        modalTask.task
-                          .split("\n")
-                          .slice(1)
-                          .join("\n")
-                          .trim() || "No additional notes."
-                      )}
-                    </div>
-                  )}
-
-                  <div className="space-y-1">
-                    <p className="text-[10px] uppercase tracking-[0.12em] text-[#8a8256]">
-                      Task description
-                    </p>
-                    {modalLoading ? (
-                      <p className="text-[11px] italic text-[#8e875d]">
-                        Loading task details…
-                      </p>
-                    ) : modalDetails?.description ? (
-                      <div className="text-[12px] leading-snug text-[#4f4b33]">
-                        {renderTextWithAnimalLinks(modalDetails.description)}
+                modalDetails?.notFound ? null : (
+                  <div className="rounded-lg border border-[#e2d7b5] bg-white/70 px-4 py-3 space-y-3">
+                    {modalTask.task.includes("\n") && (
+                      <div className="text-[11px] leading-snug text-[#44422f] bg-[#f1edd8] border border-[#dfd6b3] rounded-md px-3 py-2">
+                        {renderTextWithAnimalLinks(
+                          modalTask.task
+                            .split("\n")
+                            .slice(1)
+                            .join("\n")
+                            .trim() || "No additional notes."
+                        )}
                       </div>
-                    ) : (
-                      <p className="text-[11px] italic text-[#a19a70]">
-                        No description found for this task.
-                      </p>
                     )}
-                  </div>
 
-                  {!modalLoading ? (
-                    <div
-                      className={`space-y-1 rounded-md border px-3 py-2 ${
-                        modalDetails?.extraNotes
-                          ? "border-[#f1c38c] bg-[#fff4e5]"
-                          : "border-[#e2d7b5] bg-white/70"
-                      }`}
-                    >
+                    <div className="space-y-1">
                       <p className="text-[10px] uppercase tracking-[0.12em] text-[#8a8256]">
-                        Extra notes
+                        Task description
                       </p>
-                      {modalDetails?.extraNotes ? (
+                      {modalLoading ? (
+                        <p className="text-[11px] italic text-[#8e875d]">
+                          Loading task details…
+                        </p>
+                      ) : modalDetails?.description ? (
                         <div className="text-[12px] leading-snug text-[#4f4b33]">
-                          {renderTextWithAnimalLinks(modalDetails.extraNotes)}
+                          {renderTextWithAnimalLinks(modalDetails.description)}
                         </div>
                       ) : (
                         <p className="text-[11px] italic text-[#a19a70]">
-                          No extra notes shared yet.
+                          No description found for this task.
                         </p>
                       )}
                     </div>
-                  ) : null}
 
-                  {animalLookupError ? (
-                    <p className="text-[11px] text-red-700">{animalLookupError}</p>
-                  ) : null}
-                  {animalLoading && (
-                    <p className="text-[11px] text-[#7a7f54]">Loading animal details…</p>
-                  )}
-
-                  {!modalLoading && modalDetails?.estimatedTime ? (
-                    <div className="space-y-1">
-                      <p className="text-[10px] uppercase tracking-[0.12em] text-[#8a8256]">
-                        Estimated Time for Completion
-                      </p>
-                      <p className="text-[12px] font-semibold text-[#3e4c24]">
-                        {modalDetails.estimatedTime}
-                      </p>
-                    </div>
-                  ) : null}
-
-                  {!modalLoading && modalDetails?.links?.length ? (
-                    <div className="space-y-2">
-                      <p className="text-[10px] uppercase tracking-[0.12em] text-[#8a8256]">
-                        Relevant Links
-                      </p>
-                      <div className="flex flex-wrap gap-2">
-                        {modalDetails.links.map((link) => (
-                          <a
-                            key={`${link.url}-${link.label}`}
-                            href={link.url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="inline-flex items-center gap-1 rounded-full border border-[#cdd7ab] bg-white/80 px-3 py-1 text-[12px] font-semibold text-[#2f5ba0] underline underline-offset-2 hover:bg-[#f1edd8]"
-                          >
-                            {link.label || link.url}
-                          </a>
-                        ))}
+                    {!modalLoading ? (
+                      <div
+                        className={`space-y-1 rounded-md border px-3 py-2 ${
+                          modalDetails?.extraNotes
+                            ? "border-[#f1c38c] bg-[#fff4e5]"
+                            : "border-[#e2d7b5] bg-white/70"
+                        }`}
+                      >
+                        <p className="text-[10px] uppercase tracking-[0.12em] text-[#8a8256]">
+                          Extra notes
+                        </p>
+                        {modalDetails?.extraNotes ? (
+                          <div className="text-[12px] leading-snug text-[#4f4b33]">
+                            {renderTextWithAnimalLinks(modalDetails.extraNotes)}
+                          </div>
+                        ) : (
+                          <p className="text-[11px] italic text-[#a19a70]">
+                            No extra notes shared yet.
+                          </p>
+                        )}
                       </div>
-                    </div>
-                  ) : null}
+                    ) : null}
 
-                  <div className="text-[11px] text-[#666242]">
-                    {(() => {
-                      const me = modalTask.person.toLowerCase();
-                      const others = modalTask.groupNames.filter(
-                        (n) => n.toLowerCase() !== me
-                      );
+                    {animalLookupError ? (
+                      <p className="text-[11px] text-red-700">
+                        {animalLookupError}
+                      </p>
+                    ) : null}
+                    {animalLoading && (
+                      <p className="text-[11px] text-[#7a7f54]">
+                        Loading animal details…
+                      </p>
+                    )}
 
-                      if (others.length === 0) {
+                    {!modalLoading && modalDetails?.estimatedTime ? (
+                      <div className="space-y-1">
+                        <p className="text-[10px] uppercase tracking-[0.12em] text-[#8a8256]">
+                          Estimated Time for Completion
+                        </p>
+                        <p className="text-[12px] font-semibold text-[#3e4c24]">
+                          {modalDetails.estimatedTime}
+                        </p>
+                      </div>
+                    ) : null}
+
+                    {!modalLoading && modalDetails?.links?.length ? (
+                      <div className="space-y-2">
+                        <p className="text-[10px] uppercase tracking-[0.12em] text-[#8a8256]">
+                          Relevant Links
+                        </p>
+                        <div className="flex flex-wrap gap-2">
+                          {modalDetails.links.map((link) => (
+                            <a
+                              key={`${link.url}-${link.label}`}
+                              href={link.url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="inline-flex items-center gap-1 rounded-full border border-[#cdd7ab] bg-white/80 px-3 py-1 text-[12px] font-semibold text-[#2f5ba0] underline underline-offset-2 hover:bg-[#f1edd8]"
+                            >
+                              {link.label || link.url}
+                            </a>
+                          ))}
+                        </div>
+                      </div>
+                    ) : null}
+
+                    <div className="text-[11px] text-[#666242]">
+                      {(() => {
+                        const me = modalTask.person.toLowerCase();
+                        const others = modalTask.groupNames.filter(
+                          (n) => n.toLowerCase() !== me
+                        );
+
+                        if (others.length === 0) {
+                          return (
+                            <span>
+                              <span className="font-semibold">
+                                Assigned with:
+                              </span>{" "}
+                              (no one else – solo task)
+                            </span>
+                          );
+                        }
+
                         return (
                           <span>
-                            <span className="font-semibold">Assigned with:</span>{" "}
-                            (no one else – solo task)
+                            <span className="font-semibold">
+                              Assigned with:
+                            </span>{" "}
+                            {others.join(", ")}
                           </span>
                         );
-                      }
-
-                      return (
-                        <span>
-                          <span className="font-semibold">Assigned with:</span>{" "}
-                          {others.join(", ")}
-                        </span>
-                      );
-                    })()}
+                      })()}
+                    </div>
                   </div>
-                </div>
+                )
               ) : (
                 <div className="rounded-lg border border-[#e2d7b5] bg-white/80 px-4 py-3">
                   <p className="text-sm font-semibold text-[#3e4c24]">
@@ -2134,7 +2148,7 @@ async function handleTaskClick(taskPayload: TaskClickPayload) {
                 </div>
               )}
 
-              {showFullTaskDetail && (
+              {showFullTaskDetail && !modalDetails?.notFound && (
                 <div className="rounded-lg border border-[#e2d7b5] bg-white/70 px-4 py-3 space-y-3">
                   <div>
                     <div className="flex items-center justify-between">
@@ -2197,7 +2211,7 @@ async function handleTaskClick(taskPayload: TaskClickPayload) {
                 </div>
               )}
 
-              {showFullTaskDetail && (
+              {showFullTaskDetail && !modalDetails?.notFound && (
                 <div className="rounded-lg border border-[#e2d7b5] bg-white/70 px-4 py-3 space-y-3">
                   <div className="flex items-center justify-between">
                     <div>
@@ -2277,7 +2291,7 @@ async function handleTaskClick(taskPayload: TaskClickPayload) {
                 </div>
               )}
 
-              {showFullTaskDetail && (
+              {showFullTaskDetail && !modalDetails?.notFound && (
                 <div className="rounded-lg border border-[#e2d7b5] bg-white/70 px-4 py-3 space-y-3">
                   <div className="flex items-center justify-between">
                     <div>
