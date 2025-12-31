@@ -555,7 +555,7 @@ export async function loadWeeklyScheduleData(
   );
 
   const weekOverviewColumns = columnKeys.filter(
-    (key) => !/weekend/i.test(key)
+    (key) => !/weekend|saturday|sunday/i.test(key)
   );
 
   const weekendColumnOrder = [
