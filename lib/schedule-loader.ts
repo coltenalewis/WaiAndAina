@@ -33,6 +33,24 @@ export type ScheduleDatabaseEntry = {
   isStaging: boolean;
 };
 
+export type WeeklyScheduleData = {
+  weekLabel: string;
+  weekOverview: {
+    columns: string[];
+    rows: {
+      day: string;
+      assignments: Record<string, string[]>;
+    }[];
+  };
+  weekendSchedule: {
+    columns: string[];
+    rows: {
+      task: string;
+      assignments: Record<string, string[]>;
+    }[];
+  };
+};
+
 function getPlainText(prop: any): string {
   if (!prop) return "";
 
@@ -114,6 +132,29 @@ function parseDateValue(dateLabel: string) {
 export function scheduleTitleForDate(dateLabel: string, staging = false) {
   const formatted = formatScheduleDateLabel(dateLabel);
   return staging ? `Staging - ${formatted}` : formatted;
+}
+
+export function weeklyScheduleTitleForDate(dateLabel: string) {
+  const formatted = formatScheduleDateLabel(dateLabel);
+  return `${formatted} - Weekly`;
+}
+
+function parseNamesList(value: string): string[] {
+  if (!value) return [];
+  return value
+    .split(/[\n,]+/)
+    .map((name) => name.trim())
+    .filter(Boolean);
+}
+
+function toMondayDateLabel(dateLabel: string): string {
+  const dt = new Date(dateLabel);
+  if (Number.isNaN(dt.getTime())) return dateLabel;
+  const dayIndex = dt.getDay();
+  const diffToMonday = (dayIndex + 6) % 7;
+  const monday = new Date(dt);
+  monday.setDate(dt.getDate() - diffToMonday);
+  return formatScheduleDateLabel(monday.toLocaleDateString("en-US"));
 }
 
 export function buildDatabasePropertiesFromMeta(meta: any) {
@@ -441,4 +482,150 @@ export async function loadScheduleData(
       message: friendly,
     };
   }
+}
+
+export async function loadWeeklyScheduleData(
+  options: { dateLabel?: string } = {}
+): Promise<WeeklyScheduleData> {
+  if (!SCHEDULE_DB_ID) {
+    throw new Error("NOTION_SCHEDULE_DATABASE_ID is not set");
+  }
+
+  const children = await listAllBlockChildren(SCHEDULE_DB_ID);
+  const childDatabases = (children.results || []).filter(
+    (block: any) => block.type === "child_database"
+  );
+
+  const settingsDb = childDatabases.find(
+    (db: any) =>
+      (db.child_database?.title || "").trim().toLowerCase() === "settings"
+  );
+
+  if (!settingsDb) {
+    throw new Error("Could not find Settings database under the schedule page");
+  }
+
+  const settingsMeta = await retrieveDatabase(settingsDb.id);
+  const titleKey = getTitlePropertyKey(settingsMeta);
+  const settingsQuery = await queryDatabase(settingsDb.id, {
+    page_size: 1,
+    filter: {
+      property: titleKey,
+      title: {
+        equals: "Settings",
+      },
+    },
+    sorts: [
+      {
+        property: "Selected Schedule",
+        direction: "descending",
+      },
+    ],
+  });
+
+  const settingsRow = settingsQuery.results?.[0];
+  const selectedDate = settingsRow?.properties?.["Selected Schedule"]?.date?.start;
+
+  const baseDate = options.dateLabel
+    ? formatScheduleDateLabel(options.dateLabel)
+    : selectedDate
+      ? formatScheduleDateLabel(selectedDate)
+      : "";
+
+  if (!baseDate) {
+    throw new Error("Selected Schedule date is not configured in Notion");
+  }
+
+  const mondayLabel = toMondayDateLabel(baseDate);
+  const expectedTitle = weeklyScheduleTitleForDate(mondayLabel);
+
+  const targetDb = childDatabases.find(
+    (db: any) => (db.child_database?.title || "").trim() === expectedTitle
+  );
+
+  if (!targetDb) {
+    throw new Error(`No weekly schedule database found for ${expectedTitle}`);
+  }
+
+  const databaseMeta = await retrieveDatabase(targetDb.id);
+  const titlePropKey = getTitlePropertyKey(databaseMeta);
+  const metaProps = databaseMeta?.properties || {};
+  const columnKeys = Object.keys(metaProps).filter(
+    (key) => key !== titlePropKey
+  );
+
+  const weekOverviewColumns = columnKeys.filter(
+    (key) => !/weekend|saturday|sunday/i.test(key)
+  );
+
+  const weekendColumnOrder = [
+    "Saturday AM",
+    "Saturday PM",
+    "Sunday AM",
+    "Sunday PM",
+  ];
+  const weekendColumnKeys = weekendColumnOrder
+    .map((label) => {
+      const keyMatch = columnKeys.find(
+        (key) => key.toLowerCase() === label.toLowerCase()
+      );
+      return keyMatch ? { label, key: keyMatch } : null;
+    })
+    .filter(Boolean) as { label: string; key: string }[];
+
+  const data = await queryAllDatabasePages(targetDb.id);
+  const pages = data.results || [];
+
+  const dayOrder = [
+    "Monday",
+    "Tuesday",
+    "Wednesday",
+    "Thursday",
+    "Friday",
+    "Saturday",
+    "Sunday",
+  ];
+  const daySet = new Set(dayOrder.map((day) => day.toLowerCase()));
+
+  const weekRows: WeeklyScheduleData["weekOverview"]["rows"] = [];
+  const weekendRows: WeeklyScheduleData["weekendSchedule"]["rows"] = [];
+
+  pages.forEach((page: any) => {
+    const rowName = getPlainText(page.properties?.[titlePropKey]).trim();
+    if (!rowName) return;
+
+    if (daySet.has(rowName.toLowerCase())) {
+      const assignments: Record<string, string[]> = {};
+      weekOverviewColumns.forEach((column) => {
+        const value = getPlainText(page.properties?.[column]);
+        assignments[column] = parseNamesList(value);
+      });
+      weekRows.push({ day: rowName, assignments });
+      return;
+    }
+
+    const weekendAssignments: Record<string, string[]> = {};
+    weekendColumnKeys.forEach(({ key, label }) => {
+      const value = getPlainText(page.properties?.[key]);
+      weekendAssignments[label] = parseNamesList(value);
+    });
+    weekendRows.push({ task: rowName, assignments: weekendAssignments });
+  });
+
+  weekRows.sort(
+    (a, b) =>
+      dayOrder.indexOf(a.day) - dayOrder.indexOf(b.day)
+  );
+
+  return {
+    weekLabel: mondayLabel,
+    weekOverview: {
+      columns: weekOverviewColumns,
+      rows: weekRows,
+    },
+    weekendSchedule: {
+      columns: weekendColumnKeys.map((col) => col.label),
+      rows: weekendRows,
+    },
+  };
 }

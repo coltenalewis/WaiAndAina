@@ -21,6 +21,9 @@ function OnboardingContent() {
   const [currentPass, setCurrentPass] = useState("");
   const [newPass, setNewPass] = useState("");
   const [confirmPass, setConfirmPass] = useState("");
+  const [showCurrentPass, setShowCurrentPass] = useState(false);
+  const [showNewPass, setShowNewPass] = useState(false);
+  const [showConfirmPass, setShowConfirmPass] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
@@ -226,13 +229,23 @@ function OnboardingContent() {
                   <label className="text-xs font-semibold uppercase tracking-[0.14em] text-[#6b6f4c]">
                     Current passcode
                   </label>
-                  <input
-                    type="password"
-                    value={currentPass}
-                    onChange={(e) => setCurrentPass(e.target.value)}
-                    className="w-full rounded-md border border-[#c8cba0] bg-[#f1edd8] px-3 py-2 text-sm text-[#3b4224] shadow-inner focus:outline-none focus:ring-2 focus:ring-[#8fae4c]"
-                    placeholder="Enter your current passcode"
-                  />
+                  <div className="relative">
+                    <input
+                      type={showCurrentPass ? "text" : "password"}
+                      value={currentPass}
+                      onChange={(e) => setCurrentPass(e.target.value)}
+                      className="w-full rounded-md border border-[#c8cba0] bg-[#f1edd8] px-3 py-2 pr-14 text-sm text-[#3b4224] shadow-inner focus:outline-none focus:ring-2 focus:ring-[#8fae4c]"
+                      placeholder="Enter your current passcode"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowCurrentPass((prev) => !prev)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-[11px] font-semibold uppercase tracking-[0.12em] text-[#5a603b]"
+                      aria-label={showCurrentPass ? "Hide passcode" : "Show passcode"}
+                    >
+                      {showCurrentPass ? "Hide" : "Show"}
+                    </button>
+                  </div>
                   <p className="text-[11px] text-[#7a7f54]">
                     We&apos;ll keep your existing passcode and only update your capabilities.
                   </p>
@@ -243,13 +256,23 @@ function OnboardingContent() {
                     <label className="text-xs font-semibold uppercase tracking-[0.14em] text-[#6b6f4c]">
                       New passcode
                     </label>
-                    <input
-                      type="password"
-                      value={newPass}
-                      onChange={(e) => setNewPass(e.target.value)}
-                      className="w-full rounded-md border border-[#c8cba0] bg-[#f1edd8] px-3 py-2 text-sm text-[#3b4224] shadow-inner focus:outline-none focus:ring-2 focus:ring-[#8fae4c]"
-                      placeholder="Create a passcode"
-                    />
+                    <div className="relative">
+                      <input
+                        type={showNewPass ? "text" : "password"}
+                        value={newPass}
+                        onChange={(e) => setNewPass(e.target.value)}
+                        className="w-full rounded-md border border-[#c8cba0] bg-[#f1edd8] px-3 py-2 pr-14 text-sm text-[#3b4224] shadow-inner focus:outline-none focus:ring-2 focus:ring-[#8fae4c]"
+                        placeholder="Create a passcode"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowNewPass((prev) => !prev)}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-[11px] font-semibold uppercase tracking-[0.12em] text-[#5a603b]"
+                        aria-label={showNewPass ? "Hide passcode" : "Show passcode"}
+                      >
+                        {showNewPass ? "Hide" : "Show"}
+                      </button>
+                    </div>
                     <p className="text-[11px] text-[#7a7f54]">At least 4 characters.</p>
                   </div>
 
@@ -257,13 +280,23 @@ function OnboardingContent() {
                     <label className="text-xs font-semibold uppercase tracking-[0.14em] text-[#6b6f4c]">
                       Confirm passcode
                     </label>
-                    <input
-                      type="password"
-                      value={confirmPass}
-                      onChange={(e) => setConfirmPass(e.target.value)}
-                      className="w-full rounded-md border border-[#c8cba0] bg-[#f1edd8] px-3 py-2 text-sm text-[#3b4224] shadow-inner focus:outline-none focus:ring-2 focus:ring-[#8fae4c]"
-                      placeholder="Re-enter passcode"
-                    />
+                    <div className="relative">
+                      <input
+                        type={showConfirmPass ? "text" : "password"}
+                        value={confirmPass}
+                        onChange={(e) => setConfirmPass(e.target.value)}
+                        className="w-full rounded-md border border-[#c8cba0] bg-[#f1edd8] px-3 py-2 pr-14 text-sm text-[#3b4224] shadow-inner focus:outline-none focus:ring-2 focus:ring-[#8fae4c]"
+                        placeholder="Re-enter passcode"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowConfirmPass((prev) => !prev)}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-[11px] font-semibold uppercase tracking-[0.12em] text-[#5a603b]"
+                        aria-label={showConfirmPass ? "Hide passcode" : "Show passcode"}
+                      >
+                        {showConfirmPass ? "Hide" : "Show"}
+                      </button>
+                    </div>
                   </div>
                 </div>
               )}
