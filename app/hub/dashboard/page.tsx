@@ -168,11 +168,14 @@ export default function WorkDashboardPage() {
         const statusMap = new Map(
           (taskListJson.tasks || []).map((task: { name: string; status?: string }) => [
             task.name,
-            task.status || "",
+            String(task.status || ""),
           ])
         );
         const commentCountMap = new Map(
-          Object.entries(commentCountJson.counts || {})
+          Object.entries(commentCountJson.counts || {}).map(([name, count]) => [
+            name,
+            Number(count || 0),
+          ])
         );
 
         const currentSnapshot = tasks.map((entry) => {
@@ -181,8 +184,8 @@ export default function WorkDashboardPage() {
             task: base,
             slot: entry.slot,
             timeRange: entry.timeRange,
-            status: statusMap.get(base) || "",
-            commentCount: Number(commentCountMap.get(base) || 0),
+            status: statusMap.get(base) ?? "",
+            commentCount: commentCountMap.get(base) ?? 0,
           };
         });
 
