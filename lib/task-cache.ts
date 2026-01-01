@@ -5,9 +5,11 @@ type CacheEntry<T> = {
 
 const LIST_TTL_MS = 60_000;
 const DETAIL_TTL_MS = 30_000;
+const COMMENT_COUNT_TTL_MS = 30_000;
 
 let taskListEntry: CacheEntry<any> | null = null;
 const taskDetailCache = new Map<string, CacheEntry<any>>();
+const taskCommentCountCache = new Map<string, CacheEntry<number>>();
 
 function now() {
   return Date.now();
@@ -60,4 +62,25 @@ export function clearCachedTaskDetail(name: string) {
 
 export function clearAllTaskDetailCache() {
   taskDetailCache.clear();
+}
+
+export function getCachedTaskCommentCount(name: string) {
+  const entry = taskCommentCountCache.get(normalizeKey(name));
+  if (!entry) return null;
+  if (entry.expiresAt <= now()) {
+    taskCommentCountCache.delete(normalizeKey(name));
+    return null;
+  }
+  return entry.value;
+}
+
+export function setCachedTaskCommentCount(name: string, value: number) {
+  taskCommentCountCache.set(normalizeKey(name), {
+    value,
+    expiresAt: now() + COMMENT_COUNT_TTL_MS,
+  });
+}
+
+export function clearCachedTaskCommentCount(name: string) {
+  taskCommentCountCache.delete(normalizeKey(name));
 }

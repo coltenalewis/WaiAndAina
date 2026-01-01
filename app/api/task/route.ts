@@ -9,6 +9,7 @@ import {
 } from "@/lib/notion";
 import {
   clearCachedTaskDetail,
+  clearCachedTaskCommentCount,
   clearCachedTaskList,
   getCachedTaskDetail,
   getCachedTaskList,
@@ -394,6 +395,8 @@ export async function GET(req: Request) {
 
         const typeProp = props[TASK_TYPE_PROPERTY_KEY];
         const statusProp = props[TASK_STATUS_PROPERTY_KEY];
+        const descriptionProp = props[TASK_DESC_PROPERTY_KEY];
+        const extraNotesProp = props[TASK_NOTES_PROPERTY_KEY];
 
         return {
           id: page.id,
@@ -401,6 +404,8 @@ export async function GET(req: Request) {
           type: typeProp?.select?.name || "",
           typeColor: typeProp?.select?.color || "default",
           status: statusProp?.select?.name || "",
+          description: getPlainText(descriptionProp) || "",
+          extraNotes: getPlainText(extraNotesProp) || "",
         };
       });
 
@@ -596,6 +601,7 @@ export async function POST(req: Request) {
 
     await createComment(page.id, [{ type: "text", text: { content: comment } }]);
     clearCachedTaskDetail(name);
+    clearCachedTaskCommentCount(name);
 
     return NextResponse.json({ success: true });
   } catch (err) {
