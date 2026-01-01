@@ -8,8 +8,36 @@ if (!NOTION_TOKEN) {
 
 const NOTION_BASE_URL = "https://api.notion.com/v1";
 
+const RETRYABLE_STATUS = new Set([429, 502, 503, 504]);
+const MAX_RETRIES = 3;
+
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function notionFetch(
+  input: RequestInfo | URL,
+  init?: RequestInit,
+  retries = MAX_RETRIES
+) {
+  let attempt = 0;
+
+  while (true) {
+    const res = await fetch(input, init);
+    if (!RETRYABLE_STATUS.has(res.status) || attempt >= retries) {
+      return res;
+    }
+
+    const retryAfter = res.headers.get("Retry-After");
+    const retryDelayMs = retryAfter ? Number(retryAfter) * 1000 : 500 * 2 ** attempt;
+    const jitter = Math.floor(Math.random() * 150);
+    await sleep(retryDelayMs + jitter);
+    attempt += 1;
+  }
+}
+
 export async function retrievePage(pageId: string) {
-  const res = await fetch(`${NOTION_BASE_URL}/pages/${pageId}`, {
+  const res = await notionFetch(`${NOTION_BASE_URL}/pages/${pageId}`, {
     headers: {
       Authorization: `Bearer ${NOTION_TOKEN}`,
       "Notion-Version": NOTION_VERSION,
@@ -27,7 +55,7 @@ export async function retrievePage(pageId: string) {
 }
 
 export async function queryDatabase(databaseId: string, body: any = {}) {
-  const res = await fetch(`${NOTION_BASE_URL}/databases/${databaseId}/query`, {
+  const res = await notionFetch(`${NOTION_BASE_URL}/databases/${databaseId}/query`, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${NOTION_TOKEN}`,
@@ -80,7 +108,7 @@ export async function createPageInDatabase(
   properties: any,
   children?: any[]
 ) {
-  const res = await fetch(`${NOTION_BASE_URL}/pages`, {
+  const res = await notionFetch(`${NOTION_BASE_URL}/pages`, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${NOTION_TOKEN}`,
@@ -109,7 +137,7 @@ export async function createPageUnderPage(
   properties: any,
   children?: any[]
 ) {
-  const res = await fetch(`${NOTION_BASE_URL}/pages`, {
+  const res = await notionFetch(`${NOTION_BASE_URL}/pages`, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${NOTION_TOKEN}`,
@@ -138,7 +166,7 @@ export async function createDatabase(
   title: string,
   properties: Record<string, any>
 ) {
-  const res = await fetch(`${NOTION_BASE_URL}/databases`, {
+  const res = await notionFetch(`${NOTION_BASE_URL}/databases`, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${NOTION_TOKEN}`,
@@ -163,7 +191,7 @@ export async function createDatabase(
 }
 
 export async function retrieveDatabase(databaseId: string) {
-  const res = await fetch(`${NOTION_BASE_URL}/databases/${databaseId}`, {
+  const res = await notionFetch(`${NOTION_BASE_URL}/databases/${databaseId}`, {
     headers: {
       Authorization: `Bearer ${NOTION_TOKEN}`,
       "Notion-Version": NOTION_VERSION,
@@ -181,7 +209,7 @@ export async function retrieveDatabase(databaseId: string) {
 }
 
 export async function updatePage(pageId: string, properties: any) {
-  const res = await fetch(`${NOTION_BASE_URL}/pages/${pageId}`, {
+  const res = await notionFetch(`${NOTION_BASE_URL}/pages/${pageId}`, {
     method: "PATCH",
     headers: {
       Authorization: `Bearer ${NOTION_TOKEN}`,
@@ -202,7 +230,7 @@ export async function updatePage(pageId: string, properties: any) {
 }
 
 export async function updateDatabase(databaseId: string, properties: any) {
-  const res = await fetch(`${NOTION_BASE_URL}/databases/${databaseId}`, {
+  const res = await notionFetch(`${NOTION_BASE_URL}/databases/${databaseId}`, {
     method: "PATCH",
     headers: {
       Authorization: `Bearer ${NOTION_TOKEN}`,
@@ -223,7 +251,7 @@ export async function updateDatabase(databaseId: string, properties: any) {
 }
 
 export async function archivePage(pageId: string, archived = true) {
-  const res = await fetch(`${NOTION_BASE_URL}/pages/${pageId}`, {
+  const res = await notionFetch(`${NOTION_BASE_URL}/pages/${pageId}`, {
     method: "PATCH",
     headers: {
       Authorization: `Bearer ${NOTION_TOKEN}`,
@@ -244,7 +272,7 @@ export async function archivePage(pageId: string, archived = true) {
 }
 
 export async function retrieveComments(blockId: string) {
-  const res = await fetch(
+  const res = await notionFetch(
     `${NOTION_BASE_URL}/comments?block_id=${encodeURIComponent(blockId)}`,
     {
       headers: {
@@ -265,7 +293,7 @@ export async function retrieveComments(blockId: string) {
 }
 
 export async function createComment(blockId: string, richText: any[]) {
-  const res = await fetch(`${NOTION_BASE_URL}/comments`, {
+  const res = await notionFetch(`${NOTION_BASE_URL}/comments`, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${NOTION_TOKEN}`,
@@ -291,7 +319,7 @@ export async function listBlockChildren(
 ) {
   const search = startCursor ? `?start_cursor=${encodeURIComponent(startCursor)}` : "";
 
-  const res = await fetch(
+  const res = await notionFetch(
     `${NOTION_BASE_URL}/blocks/${blockId}/children${search}`,
     {
       headers: {
@@ -332,7 +360,7 @@ export async function listAllBlockChildren(blockId: string) {
 }
 
 export async function retrieveBlock(blockId: string) {
-  const res = await fetch(`${NOTION_BASE_URL}/blocks/${blockId}`, {
+  const res = await notionFetch(`${NOTION_BASE_URL}/blocks/${blockId}`, {
     headers: {
       Authorization: `Bearer ${NOTION_TOKEN}`,
       "Notion-Version": NOTION_VERSION,
