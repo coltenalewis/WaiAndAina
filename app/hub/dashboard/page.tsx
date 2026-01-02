@@ -165,13 +165,13 @@ export default function WorkDashboardPage() {
         const commentCountJson = commentCountRes.ok
           ? await commentCountRes.json()
           : { counts: {} };
-        const statusMap = new Map(
+        const statusMap = new Map<string, string>(
           (taskListJson.tasks || []).map((task: { name: string; status?: string }) => [
             task.name,
             String(task.status || ""),
           ])
         );
-        const commentCountMap = new Map(
+        const commentCountMap = new Map<string, number>(
           Object.entries(commentCountJson.counts || {}).map(([name, count]) => [
             name,
             Number(count || 0),
