@@ -734,7 +734,13 @@ export default function HubSchedulePage() {
       setError(null);
 
       try {
-        const res = await fetch("/api/schedule", { cache: "no-store" });
+        const controller = new AbortController();
+        const timeoutId = window.setTimeout(() => controller.abort(), 20_000);
+        const res = await fetch("/api/schedule", {
+          cache: "no-store",
+          signal: controller.signal,
+        });
+        window.clearTimeout(timeoutId);
         if (!res.ok) {
           throw new Error(`HTTP ${res.status}`);
         }
@@ -743,7 +749,11 @@ export default function HubSchedulePage() {
         setError(json.message || null);
       } catch (e) {
         console.error(e);
-        setError("Unable to load schedule. Please refresh when online.");
+        if (e instanceof DOMException && e.name === "AbortError") {
+          setError("Schedule request timed out. Please refresh.");
+        } else {
+          setError("Unable to load schedule. Please refresh when online.");
+        }
       } finally {
         scheduleFetchInFlight.current = false;
         if (showLoading) setLoading(false);
