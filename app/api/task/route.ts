@@ -7,6 +7,15 @@ import {
   retrieveComments,
   updatePage,
 } from "@/lib/notion";
+import {
+  clearCachedTaskDetail,
+  clearCachedTaskCommentCount,
+  clearCachedTaskList,
+  getCachedTaskDetail,
+  getCachedTaskList,
+  setCachedTaskDetail,
+  setCachedTaskList,
+} from "@/lib/task-cache";
 
 const TASKS_DB_ID = process.env.NOTION_TASKS_DATABASE_ID as string | undefined;
 
@@ -371,6 +380,11 @@ export async function GET(req: Request) {
 
   if (listOnly) {
     try {
+      const cachedList = getCachedTaskList();
+      if (cachedList) {
+        return NextResponse.json(cachedList);
+      }
+
       const data = await queryAllDatabasePages(TASKS_DB_ID, {
         sorts: [{ property: TASK_NAME_PROPERTY_KEY, direction: "ascending" }],
       });
@@ -381,6 +395,8 @@ export async function GET(req: Request) {
 
         const typeProp = props[TASK_TYPE_PROPERTY_KEY];
         const statusProp = props[TASK_STATUS_PROPERTY_KEY];
+        const descriptionProp = props[TASK_DESC_PROPERTY_KEY];
+        const extraNotesProp = props[TASK_NOTES_PROPERTY_KEY];
 
         return {
           id: page.id,
@@ -388,10 +404,14 @@ export async function GET(req: Request) {
           type: typeProp?.select?.name || "",
           typeColor: typeProp?.select?.color || "default",
           status: statusProp?.select?.name || "",
+          description: getPlainText(descriptionProp) || "",
+          extraNotes: getPlainText(extraNotesProp) || "",
         };
       });
 
-      return NextResponse.json({ tasks });
+      const payload = { tasks };
+      setCachedTaskList(payload);
+      return NextResponse.json(payload);
     } catch (err) {
       console.error("Failed to list tasks:", err);
       return NextResponse.json({ error: "Unable to load tasks" }, { status: 500 });
@@ -403,6 +423,11 @@ export async function GET(req: Request) {
   }
 
   try {
+    const cachedDetail = getCachedTaskDetail(name);
+    if (cachedDetail) {
+      return NextResponse.json(cachedDetail);
+    }
+
     const page = await findTaskPageByName(name);
     if (!page) return NextResponse.json({ error: "Task not found" }, { status: 404 });
 
@@ -412,7 +437,9 @@ export async function GET(req: Request) {
     });
     const payload = await buildTaskPayload(page, name);
     const taskProperties = buildEditableProperties(page?.properties || {}, db?.properties || {});
-    return NextResponse.json({ ...payload, properties: taskProperties });
+    const responsePayload = { ...payload, properties: taskProperties };
+    setCachedTaskDetail(name, responsePayload);
+    return NextResponse.json(responsePayload);
   } catch (err) {
     console.error("GET /task failed:", err);
     return NextResponse.json({ error: "Failed to fetch task" }, { status: 500 });
@@ -527,7 +554,11 @@ export async function PATCH(req: Request) {
     await updatePage(page.id, properties);
 
     const refreshed = await findTaskPageByName(name);
-    if (!refreshed) return NextResponse.json({ success: true });
+    if (!refreshed) {
+      clearCachedTaskDetail(name);
+      clearCachedTaskList();
+      return NextResponse.json({ success: true });
+    }
 
     const db = await retrieveDatabase(TASKS_DB_ID).catch((err) => {
       console.error("Failed to retrieve tasks database:", err);
@@ -539,7 +570,10 @@ export async function PATCH(req: Request) {
       db?.properties || {}
     );
 
-    return NextResponse.json({ ...payload, properties: refreshedProperties });
+    const responsePayload = { ...payload, properties: refreshedProperties };
+    setCachedTaskDetail(name, responsePayload);
+    clearCachedTaskList();
+    return NextResponse.json(responsePayload);
   } catch (err) {
     console.error("PATCH /task failed:", err);
     return NextResponse.json({ error: "Failed to update task" }, { status: 500 });
@@ -566,6 +600,8 @@ export async function POST(req: Request) {
     if (!page) return NextResponse.json({ error: "Task not found" }, { status: 404 });
 
     await createComment(page.id, [{ type: "text", text: { content: comment } }]);
+    clearCachedTaskDetail(name);
+    clearCachedTaskCommentCount(name);
 
     return NextResponse.json({ success: true });
   } catch (err) {

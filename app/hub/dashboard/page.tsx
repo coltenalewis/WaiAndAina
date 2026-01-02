@@ -152,40 +152,40 @@ export default function WorkDashboardPage() {
           new Set(tasks.map((entry) => taskBaseName(entry.task)))
         ).filter(Boolean);
 
-        const [taskListRes, detailResults] = await Promise.all([
+        const [taskListRes, commentCountRes] = await Promise.all([
           fetch("/api/task?list=1"),
-          Promise.all(
-            uniqueTaskNames.map(async (taskName) => {
-              const detailRes = await fetch(`/api/task?name=${encodeURIComponent(taskName)}`);
-              if (!detailRes.ok) return { name: taskName, status: "", commentCount: 0 };
-              const detail = await detailRes.json();
-              return {
-                name: taskName,
-                status: detail.status || "",
-                commentCount: Array.isArray(detail.comments) ? detail.comments.length : 0,
-              };
-            })
-          ),
+          fetch("/api/task/comment-counts", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ names: uniqueTaskNames }),
+          }),
         ]);
 
         const taskListJson = taskListRes.ok ? await taskListRes.json() : { tasks: [] };
-        const statusMap = new Map(
+        const commentCountJson = commentCountRes.ok
+          ? await commentCountRes.json()
+          : { counts: {} };
+        const statusMap = new Map<string, string>(
           (taskListJson.tasks || []).map((task: { name: string; status?: string }) => [
             task.name,
-            task.status || "",
+            String(task.status || ""),
           ])
         );
-        const detailMap = new Map(detailResults.map((item) => [item.name, item]));
+        const commentCountMap = new Map<string, number>(
+          Object.entries(commentCountJson.counts || {}).map(([name, count]) => [
+            name,
+            Number(count || 0),
+          ])
+        );
 
         const currentSnapshot = tasks.map((entry) => {
           const base = taskBaseName(entry.task);
-          const detail = detailMap.get(base);
           return {
             task: base,
             slot: entry.slot,
             timeRange: entry.timeRange,
-            status: detail?.status || statusMap.get(base) || "",
-            commentCount: detail?.commentCount || 0,
+            status: statusMap.get(base) ?? "",
+            commentCount: commentCountMap.get(base) ?? 0,
           };
         });
 

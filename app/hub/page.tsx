@@ -734,7 +734,13 @@ export default function HubSchedulePage() {
       setError(null);
 
       try {
-        const res = await fetch("/api/schedule", { cache: "no-store" });
+        const controller = new AbortController();
+        const timeoutId = window.setTimeout(() => controller.abort(), 20_000);
+        const res = await fetch("/api/schedule", {
+          cache: "no-store",
+          signal: controller.signal,
+        });
+        window.clearTimeout(timeoutId);
         if (!res.ok) {
           throw new Error(`HTTP ${res.status}`);
         }
@@ -743,7 +749,11 @@ export default function HubSchedulePage() {
         setError(json.message || null);
       } catch (e) {
         console.error(e);
-        setError("Unable to load schedule. Please refresh when online.");
+        if (e instanceof DOMException && e.name === "AbortError") {
+          setError("Schedule request timed out. Please refresh.");
+        } else {
+          setError("Unable to load schedule. Please refresh when online.");
+        }
       } finally {
         scheduleFetchInFlight.current = false;
         if (showLoading) setLoading(false);
@@ -791,52 +801,48 @@ export default function HubSchedulePage() {
     if (missing.length === 0) return;
 
     (async () => {
-      const results = await Promise.all(
-        missing.map(async (name) => {
-          try {
-            const res = await fetch(
-              `/api/task?name=${encodeURIComponent(name)}`
-            );
-            if (!res.ok) return null;
-            const json = await res.json();
-            return {
-              key: json.name || name,
-              original: name,
-              status: json.status || "",
-              description: json.description || "",
-              extraNotes: json.extraNotes || "",
-              typeName: json.taskType?.name || "",
-              typeColor: json.taskType?.color || "default",
-            } as const;
-          } catch (err) {
-            console.error("Failed to preload task meta", err);
-            return null;
-          }
-        })
-      );
+      try {
+        const res = await fetch("/api/task?list=1");
+        if (!res.ok) return;
+        const json = await res.json();
+        const taskMap = new Map<string, {
+          name: string;
+          status?: string;
+          description?: string;
+          extraNotes?: string;
+          type?: string;
+          typeColor?: string;
+        }>(
+          (json.tasks || []).map((task: {
+            name: string;
+            status?: string;
+            description?: string;
+            extraNotes?: string;
+            type?: string;
+            typeColor?: string;
+          }) => [task.name, task])
+        );
 
-      setTaskMetaMap((prev) => {
-        const next = { ...prev } as Record<string, TaskMeta>;
-        results.forEach((item) => {
-          if (item) {
-            next[item.key] = {
-              status: item.status,
-              description: item.description,
-              extraNotes: item.extraNotes,
-              typeName: item.typeName,
-              typeColor: item.typeColor,
+        setTaskMetaMap((prev) => {
+          const next = { ...prev } as Record<string, TaskMeta>;
+          missing.forEach((name) => {
+            const task = taskMap.get(name);
+            if (!task) return;
+            const payload = {
+              status: task.status || "",
+              description: task.description || "",
+              extraNotes: task.extraNotes || "",
+              typeName: task.type || "",
+              typeColor: task.typeColor || "default",
             };
-            next[item.original] = {
-              status: item.status,
-              description: item.description,
-              extraNotes: item.extraNotes,
-              typeName: item.typeName,
-              typeColor: item.typeColor,
-            };
-          }
+            next[task.name] = payload;
+            next[name] = payload;
+          });
+          return next;
         });
-        return next;
-      });
+      } catch (err) {
+        console.error("Failed to preload task meta", err);
+      }
     })();
   }, [data, taskMetaMap]);
 
