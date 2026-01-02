@@ -795,8 +795,22 @@ export default function HubSchedulePage() {
         const res = await fetch("/api/task?list=1");
         if (!res.ok) return;
         const json = await res.json();
-        const taskMap = new Map(
-          (json.tasks || []).map((task: any) => [task.name, task])
+        const taskMap = new Map<string, {
+          name: string;
+          status?: string;
+          description?: string;
+          extraNotes?: string;
+          type?: string;
+          typeColor?: string;
+        }>(
+          (json.tasks || []).map((task: {
+            name: string;
+            status?: string;
+            description?: string;
+            extraNotes?: string;
+            type?: string;
+            typeColor?: string;
+          }) => [task.name, task])
         );
 
         setTaskMetaMap((prev) => {
